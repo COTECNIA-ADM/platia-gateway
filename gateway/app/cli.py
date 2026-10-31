@@ -5,8 +5,9 @@ Uso dentro de Docker (el contenedor de migraciones tiene acceso a MySQL):
     docker compose run --rm migrations python -m app.cli <orden> [opciones]
 
 Órdenes: create-org, create-team, create-app, create-key, revoke-key, create-provider,
-create-model, create-deployment, set-price, show y usage (consumo y coste, para compararlo
-con lo que registra PLATIA). `python -m app.cli <orden> -h`
+create-model, set-fallbacks (cadena de reserva), create-deployment, set-deployment
+(prioridad, peso o estado), set-price, show y usage (consumo y coste, para compararlo con lo
+que registra PLATIA). `python -m app.cli <orden> -h`
 explica cada una.
 
 La clave de un proveedor nunca va como argumento (quedaría en el historial de la shell):
@@ -149,10 +150,43 @@ def create_provider(db: Session, args, settings: Settings) -> None:
 def create_model(db: Session, args, settings: Settings) -> None:
     model = LlmModel(model_key=args.key, display_name=args.name, family=args.family,
                      context_window=args.context_window, max_output_tokens=args.max_output_tokens,
-                     capabilities=args.capability or [])
+                     capabilities=args.capability or [],
+                     fallback_models=_fallbacks(db, args.key, args.fallback) or None)
     db.add(model)
     db.flush()
     _out(f"Modelo '{model.model_key}' creado (id {model.id})")
+
+
+def _fallbacks(db: Session, model_key: str, keys: list[str] | None) -> list[str]:
+    """Comprueba la cadena de reserva: modelos existentes, sin repetir y sin el propio modelo."""
+    chain: list[str] = []
+    for key in keys or []:
+        if key == model_key:
+            raise CliError("Un modelo no puede ser su propia reserva")
+        if key not in chain:
+            _one(db, LlmModel, model_key=key, deleted_at=None)
+            chain.append(key)
+    return chain
+
+
+def set_fallbacks(db: Session, args, settings: Settings) -> None:
+    model = _one(db, LlmModel, model_key=args.model, deleted_at=None)
+    model.fallback_models = _fallbacks(db, model.model_key, args.to) or None
+    db.flush()
+    _out(f"Reserva de '{model.model_key}': {' → '.join(model.fallback_models or []) or 'ninguna'}")
+
+
+def set_deployment(db: Session, args, settings: Settings) -> None:
+    deployment = _one(db, Deployment, id=args.id, deleted_at=None)
+    if args.priority is not None:
+        deployment.priority = args.priority
+    if args.weight is not None:
+        deployment.weight = args.weight
+    if args.active is not None:
+        deployment.is_active = args.active
+    db.flush()
+    _out(f"Despliegue {deployment.id}: prioridad {deployment.priority}, peso {deployment.weight}, "
+         f"{'activo' if deployment.is_active else 'inactivo'}")
 
 
 def create_deployment(db: Session, args, settings: Settings) -> None:
@@ -189,8 +223,13 @@ def show(db: Session, args, settings: Settings) -> None:
                       .join(Provider, Deployment.provider_id == Provider.id)
                       .where(Deployment.deleted_at.is_(None))).all()
     for deployment, model, provider in rows:
+        state = "" if deployment.is_active else ", inactivo"
         _out(f"Modelo {model.model_key} → {provider.slug} ({provider.kind}) como {deployment.upstream_model} "
-             f"[prioridad {deployment.priority}, peso {deployment.weight}]")
+             f"[despliegue {deployment.id}, prioridad {deployment.priority}, peso {deployment.weight}{state}]")
+    for model in db.execute(select(LlmModel).where(LlmModel.deleted_at.is_(None),
+                                                   LlmModel.fallback_models.is_not(None))).scalars():
+        if model.fallback_models:
+            _out(f"Reserva de {model.model_key}: {' → '.join(model.fallback_models)}")
 
 
 def usage(db: Session, args, settings: Settings) -> None:
@@ -282,7 +321,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--context-window", type=int)
     p.add_argument("--max-output-tokens", type=int)
     p.add_argument("--capability", action="append", help="tools, thinking, structured_output... (repetible)")
+    p.add_argument("--fallback", action="append", help="Modelo de reserva, en orden (repetible)")
     p.set_defaults(handler=create_model)
+
+    p = sub.add_parser("set-fallbacks", help="Cambiar la cadena de reserva de un modelo")
+    p.add_argument("--model", required=True)
+    p.add_argument("--to", action="append", help="Modelo de reserva, en orden (repetible; sin --to, ninguna)")
+    p.set_defaults(handler=set_fallbacks)
+
+    p = sub.add_parser("set-deployment", help="Cambiar prioridad, peso o estado de un despliegue (id en 'show')")
+    p.add_argument("--id", required=True, type=int)
+    p.add_argument("--priority", type=int)
+    p.add_argument("--weight", type=int)
+    state = p.add_mutually_exclusive_group()
+    state.add_argument("--active", dest="active", action="store_const", const=True)
+    state.add_argument("--inactive", dest="active", action="store_const", const=False)
+    p.set_defaults(handler=set_deployment)
 
     p = sub.add_parser("create-deployment", help="Servir un modelo desde un proveedor")
     p.add_argument("--model", required=True)

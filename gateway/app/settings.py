@@ -53,6 +53,18 @@ class Settings:
     # Tamaño máximo del cuerpo de una petición (Nginx tiene su propio límite, igual o mayor)
     max_body_bytes: int = field(default_factory=lambda: _int("MAX_BODY_BYTES", str(10 * 1024 * 1024)))
 
+    # --- Reserva y enfriamiento de despliegues (G6, ADR-010)
+    # Destinos que se prueban como máximo en una petición (el primero y sus reservas)
+    route_max_attempts: int = field(default_factory=lambda: _int("ROUTE_MAX_ATTEMPTS", "3"))
+    # No se empieza otro intento si la petición ya lleva este tiempo: Nginx corta a los 330 s
+    route_retry_window_seconds: float = field(default_factory=lambda: _float("ROUTE_RETRY_WINDOW_SECONDS", "120"))
+    # Fallos seguidos (en la ventana) que enfrían un despliegue, y cuánto dura el enfriamiento.
+    # Un 429 del proveedor lo enfría a la primera (con su Retry-After si lo manda, hasta el máximo)
+    cooldown_failures: int = field(default_factory=lambda: _int("COOLDOWN_FAILURES", "3"))
+    cooldown_window_seconds: int = field(default_factory=lambda: _int("COOLDOWN_WINDOW_SECONDS", "60"))
+    cooldown_seconds: int = field(default_factory=lambda: _int("COOLDOWN_SECONDS", "60"))
+    cooldown_max_seconds: int = field(default_factory=lambda: _int("COOLDOWN_MAX_SECONDS", "300"))
+
     # --- Comprobaciones de salud: tiempo máximo por dependencia
     health_timeout_seconds: float = field(default_factory=lambda: _float("HEALTH_TIMEOUT_SECONDS", "2"))
 

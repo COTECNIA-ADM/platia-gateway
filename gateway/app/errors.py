@@ -16,13 +16,20 @@ class GatewayError(Exception):
     status: int = 500
     kind: str = "api_error"
 
-    def __init__(self, message: str, *, status: int | None = None, kind: str | None = None):
+    def __init__(self, message: str, *, status: int | None = None, kind: str | None = None,
+                 fallback: bool = False, rate_limited: bool = False, retry_after: float | None = None):
         super().__init__(message)
         self.message = message
         if status is not None:
             self.status = status
         if kind is not None:
             self.kind = kind
+        # Lo marca el adaptador del proveedor (G6): el fallo es del destino, no de la petición,
+        # así que se puede probar el siguiente de la cadena de reserva
+        self.fallback = fallback
+        # El proveedor dijo 429/529: el despliegue se enfría a la primera, Retry-After segundos si lo manda
+        self.rate_limited = rate_limited
+        self.retry_after = retry_after
 
 
 class InvalidRequest(GatewayError):

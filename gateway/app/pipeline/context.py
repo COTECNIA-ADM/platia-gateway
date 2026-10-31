@@ -1,6 +1,7 @@
 """Contexto que comparten las etapas del pipeline y dependencias que reciben."""
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from typing import Any
 from decimal import Decimal
 from time import perf_counter
 
@@ -21,6 +22,8 @@ class Deps:
     sessions: Callable[[], AsyncSession]
     http: httpx.AsyncClient
     encryption_key: bytes | None
+    # Enfriamiento de despliegues (G6); None en los tests que no lo necesitan
+    redis: Any = None
 
 
 @dataclass(frozen=True)
@@ -43,6 +46,18 @@ class ModelInfo:
     id: int
     key: str
     max_output_tokens: int | None
+    # Cadena de reserva del modelo (G6), en orden
+    fallbacks: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class Candidate:
+    """Un destino que puede atender la petición, con el cuerpo ya preparado para él (G6)."""
+    model: ModelInfo
+    target: Target
+    body: dict
+    # El gateway pidió el uso al proveedor (OpenAI) sin que el cliente lo pidiera: no se le reenvía
+    hide_usage_chunk: bool = False
 
 
 @dataclass
@@ -58,13 +73,15 @@ class PipelineContext:
     identity: Identity | None = None
     purpose: str = "default"
     end_user_ref: str | None = None
-    # policy
+    # policy (el modelo pedido) y execute (el que atiende, si hubo reserva)
     model: ModelInfo | None = None
-    # route
+    # route: destinos en el orden en que se prueban
+    candidates: list[Candidate] = field(default_factory=list)
+    # execute: el destino del intento en curso (o del último) y cuántos se han probado
     target: Target | None = None
     upstream_body: dict | None = None
-    # El gateway pidió el uso al proveedor (OpenAI) sin que el cliente lo pidiera: no se le reenvía
     hide_usage_chunk: bool = False
+    attempts: int = 0
     # execute
     response_body: dict | None = None
     usage: Usage = field(default_factory=Usage)

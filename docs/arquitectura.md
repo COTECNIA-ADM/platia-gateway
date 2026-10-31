@@ -104,6 +104,13 @@ eventos SSE tal cual entre familias iguales, o traducidos si son de familias dis
 (solo texto). También lee el uso de tokens y cierra la auditoría en el `finally` del
 generador, aunque el cliente se desconecte.
 
+**Reserva** (G6, [ADR-010](adr/ADR-010-reserva-y-enfriamiento.md)): `route` deja una lista
+ordenada de destinos: los despliegues del modelo pedido (por prioridad y peso) y después los
+de su cadena de reserva que la aplicación tenga permitidos. `execute` la recorre mientras
+el fallo sea del destino (429, 5xx, sin respuesta) y no de la petición (400). Los
+despliegues que fallan se enfrían en Redis (`cooldown.py`) y pasan al final de la lista.
+La auditoría guarda los intentos y el destino que respondió.
+
 **Etapas del libro que no entran ahora**: ganchos corporativos antes y después del chat
 (con los webhooks de G12), caché exacta y semántica (G11, opcional), contexto RAG (PLATIA
 ya lo tiene), recorte del historial y control previo de ventana (se reconsideran en G7).

@@ -4,7 +4,7 @@
   se guarda cifrada (`app.crypto`).
 - **Modelo**: el nombre que piden los clientes (`claude-sonnet-5-5`) y lo que sabe hacer.
 - **Despliegue**: un modelo servido por un proveedor concreto, con el nombre que ese
-  proveedor usa; un modelo puede tener varios (reparto por peso y reserva, G6).
+  proveedor usa; un modelo puede tener varios (prioridad, reparto por peso y reserva, G6).
 - **Precio**: USD por millón de tokens, con fecha de inicio; nunca se sobrescribe.
 """
 from datetime import datetime
@@ -59,6 +59,9 @@ class LlmModel(TimestampMixin, SoftDeleteMixin, Base):
     # Funciones que admite: "tools", "thinking", "structured_output", "vision", "prompt_cache"...
     # Un destino sin una función que la petición usa no es elegible (ADR-002).
     capabilities: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    # Cadena de reserva (G6): otros modelos, en orden, que pueden atender la petición si fallan
+    # todos los despliegues de este. Solo se usan los que la aplicación tiene permitidos.
+    fallback_models: Mapped[list | None] = mapped_column(JSON, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 

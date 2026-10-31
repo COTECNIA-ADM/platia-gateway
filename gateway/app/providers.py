@@ -83,30 +83,45 @@ def _upstream_message(response: httpx.Response) -> str:
     return ""
 
 
+def _retry_after(response: httpx.Response) -> float | None:
+    """Segundos de la cabecera Retry-After (solo la forma numérica)."""
+    value = response.headers.get("retry-after", "").strip()
+    try:
+        seconds = float(value)
+    except ValueError:
+        return None
+    return seconds if seconds > 0 else None
+
+
 def _raise_for(response: httpx.Response, target: Target) -> None:
+    """Traduce el error del proveedor. Todos menos los de la petición permiten probar otro destino (G6)."""
     status = response.status_code
     message = sanitize(_upstream_message(response))
     log.warning("provider.error", provider=target.provider_slug, deployment_id=target.deployment_id,
                 upstream_status=status, upstream_message=message)
     if status in (400, 413, 422):
-        # Error de la petición del cliente: se le devuelve, limpio, para que lo corrija
+        # Error de la petición del cliente: se le devuelve, limpio, para que lo corrija. Otro
+        # destino la rechazaría igual
         raise InvalidRequest(f"El proveedor rechazó la petición: {message or 'petición no válida'}",
                              status=413 if status == 413 else 400,
                              kind="request_too_large" if status == 413 else None)
-    if status in (429, 503, 529):
-        raise Unavailable("El proveedor está saturado; vuelve a intentarlo en unos segundos")
+    if status in (429, 529):
+        raise Unavailable("El proveedor está saturado; vuelve a intentarlo en unos segundos", fallback=True,
+                          rate_limited=True, retry_after=_retry_after(response))
+    if status == 503:
+        raise Unavailable("El proveedor está saturado; vuelve a intentarlo en unos segundos", fallback=True)
     if status in (401, 403, 404):
         # Credencial o modelo del proveedor mal configurados: es un problema nuestro, no del cliente
-        raise UpstreamFailed("El proveedor no aceptó la configuración del gateway")
-    raise UpstreamFailed("El proveedor devolvió un error")
+        raise UpstreamFailed("El proveedor no aceptó la configuración del gateway", fallback=True)
+    raise UpstreamFailed("El proveedor devolvió un error", fallback=True)
 
 
 def _request_failed(exc: httpx.HTTPError, target: Target) -> UpstreamFailed | UpstreamTimeout:
     if isinstance(exc, httpx.TimeoutException):
         log.warning("provider.timeout", provider=target.provider_slug, error_type=type(exc).__name__)
-        return UpstreamTimeout("El proveedor no respondió a tiempo")
+        return UpstreamTimeout("El proveedor no respondió a tiempo", fallback=True)
     log.warning("provider.unreachable", provider=target.provider_slug, error_type=type(exc).__name__)
-    return UpstreamFailed("No se pudo contactar con el proveedor")
+    return UpstreamFailed("No se pudo contactar con el proveedor", fallback=True)
 
 
 async def open_stream(client: httpx.AsyncClient, target: Target, body: dict, client_headers) -> httpx.Response:
@@ -143,8 +158,8 @@ async def send(client: httpx.AsyncClient, target: Target, body: dict, client_hea
     try:
         data = response.json()
     except ValueError as exc:
-        raise UpstreamFailed("El proveedor devolvió una respuesta que no es JSON") from exc
+        raise UpstreamFailed("El proveedor devolvió una respuesta que no es JSON", fallback=True) from exc
     if not isinstance(data, dict):
-        raise UpstreamFailed("El proveedor devolvió una respuesta inesperada")
+        raise UpstreamFailed("El proveedor devolvió una respuesta inesperada", fallback=True)
     return data
 

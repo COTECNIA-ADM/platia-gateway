@@ -53,6 +53,22 @@ Las mismas rutas aceptan el contrato de OpenAI (`POST /v1/chat/completions`, cla
 `client.messages.stream(...)` del SDK de Anthropic y `stream=True` del de OpenAI. En
 streaming, el coste no va en una cabecera, pero queda en la auditoría.
 
+## Reserva entre proveedores
+
+Un modelo puede tener varios despliegues (en el mismo proveedor o en otros) y una cadena de
+modelos de reserva. Si un destino falla por algo suyo (saturado, caído, sin respuesta), la
+petición pasa al siguiente sin que el cliente lo note; los que fallan se enfrían un rato.
+
+```bash
+cli create-deployment --model claude-sonnet-5-5 --provider anthropic-2 --priority 1   # segundo destino
+cli set-fallbacks --model claude-sonnet-5-5 --to claude-haiku-5-5                    # modelo de reserva
+cli set-deployment --id 3 --inactive                                                 # retirar un destino
+cli show                                                                             # ids, prioridades y cadenas
+```
+
+La respuesta dice el modelo que respondió (`X-Platia-Model-Used`) y cuántos destinos se
+probaron (`X-Platia-Attempts`). Detalles y límites en [ADR-010](docs/adr/ADR-010-reserva-y-enfriamiento.md).
+
 ## Conexión con PLATIA
 
 `bash scripts/alta_platia.sh` (con `ANTHROPIC_API_KEY` exportada) da de alta PLATIA con sus

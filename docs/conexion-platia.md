@@ -79,14 +79,27 @@ fecha de entrada en vigor; no se reescribe el pasado).
 
 La auditoría del gateway nunca guarda el texto de los prompts ni de las respuestas.
 
-## 4. Volver atrás
+## 4. Reserva si Anthropic falla
+
+Mientras PLATIA usa el gateway, su reserva directa está apagada y la reserva es cosa del
+gateway ([ADR-010](adr/ADR-010-reserva-y-enfriamiento.md)). Con los tres modelos de
+`alta_platia.sh` cada uno tiene un solo despliegue: si Anthropic devuelve 429 o 503, el
+gateway lo prueba igual, pero no tiene a dónde más ir. Para tener reserva hay dos opciones:
+
+- **Otro despliegue del mismo modelo** (otra cuenta o región): `cli create-provider` con su
+  clave y `cli create-deployment --model claude-sonnet-5-5 --provider <nuevo> --priority 1`.
+- **Otro modelo** como reserva: `cli set-fallbacks --model claude-opus-5-5 --to claude-sonnet-5-5`.
+  Responde un modelo distinto del que eligió PLATIA (lo dice `X-Platia-Model-Used` y la
+  auditoría), así que conviene decidirlo tarea a tarea.
+
+## 5. Volver atrás
 
 En el `.env` de PLATIA, `LLM_GATEWAY_ENABLED=false` y la `ANTHROPIC_API_KEY` puesta, y
 rearrancar `ai_service`. No hace falta desplegar código. Mientras el interruptor está
 encendido no hay salto automático a la llamada directa: si el gateway cae, la IA de PLATIA
 no responde hasta que vuelva (fallar cerrado).
 
-## 5. Prueba en Docker sin coste
+## 6. Prueba en Docker sin coste
 
 ```bash
 PLATIA_DIR=../platia-dev bash scripts/prueba_platia.sh

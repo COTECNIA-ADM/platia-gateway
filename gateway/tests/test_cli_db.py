@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app import cli
 from app.crypto import decrypt, load_key
 from app.main import create_app
-from app.models import ApiKey, ModelPrice, Provider
+from app.models import ApiKey, Deployment, LlmModel, ModelPrice, Provider
 
 from .conftest import ANTHROPIC_REPLY, KEY_B64, needs_db
 
@@ -144,3 +144,34 @@ def test_consumo_por_proposito_y_modelo(settings, capsys, client, world):
 def test_repetir_con_exists_ok(settings, capsys):
     code, out, _ = _run(settings, capsys, "--exists-ok", "create-org", "--slug", "cotecnia", "--name", "Otra vez")
     assert code == 0 and "Ya existía" in out
+
+
+def test_cadena_de_reserva_y_despliegues(settings, capsys, engine, world):
+    code, out, _ = _run(settings, capsys, "create-model", "--key", "claude-mini", "--name", "Mini", "--family",
+                        "anthropic", "--fallback", "claude-test", "--fallback", "gpt-test", "--fallback", "claude-test")
+    assert code == 0
+    code, out, _ = _run(settings, capsys, "set-fallbacks", "--model", "gpt-test", "--to", "claude-mini")
+    assert (code, out.strip()) == (0, "Reserva de 'gpt-test': claude-mini")
+    code, out, err = _run(settings, capsys, "set-fallbacks", "--model", "gpt-test", "--to", "gpt-test")
+    assert code == 1 and "propia reserva" in err
+    code, out, err = _run(settings, capsys, "set-fallbacks", "--model", "gpt-test", "--to", "no-existe")
+    assert code == 1 and "No existe" in err
+
+    with Session(engine) as db:
+        deployment = db.execute(select(Deployment).where(Deployment.model_id == world.claude_id)).scalar_one()
+    code, out, _ = _run(settings, capsys, "set-deployment", "--id", str(deployment.id), "--priority", "2",
+                        "--weight", "0", "--inactive")
+    assert out.strip() == f"Despliegue {deployment.id}: prioridad 2, peso 0, inactivo"
+    code, out, _ = _run(settings, capsys, "show")
+    assert f"[despliegue {deployment.id}, prioridad 2, peso 0, inactivo]" in out
+    assert "Reserva de claude-mini: claude-test → gpt-test" in out
+    assert "Reserva de gpt-test: claude-mini" in out
+
+    code, out, _ = _run(settings, capsys, "set-fallbacks", "--model", "gpt-test")
+    assert out.strip() == "Reserva de 'gpt-test': ninguna"
+    with Session(engine) as db:
+        assert db.execute(select(LlmModel.fallback_models).filter_by(model_key="gpt-test")).scalar_one() is None
+        assert db.execute(select(LlmModel.fallback_models).filter_by(model_key="claude-mini")).scalar_one() == [
+            "claude-test", "gpt-test"]
+    code, out, _ = _run(settings, capsys, "set-deployment", "--id", str(deployment.id), "--active")
+    assert out.strip().endswith("activo") and "inactivo" not in out

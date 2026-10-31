@@ -91,11 +91,12 @@ async def run_inference(request: Request, contract: Contract):
 
     log.info("request.completed", request_id=ctx.request_id, contract=contract,
              application=ctx.identity.application_slug, purpose=ctx.purpose, model=ctx.model.key,
-             provider=ctx.target.provider_slug, input_tokens=ctx.usage.input, output_tokens=ctx.usage.output,
+             provider=ctx.target.provider_slug, attempts=ctx.attempts, input_tokens=ctx.usage.input, output_tokens=ctx.usage.output,
              cost_usd=str(ctx.cost_usd), latency_ms=ctx.elapsed_ms())
     return JSONResponse(ctx.response_body, headers={
         "X-Request-ID": ctx.request_id,
         "X-Platia-Model-Used": ctx.model.key,
+        "X-Platia-Attempts": str(ctx.attempts),
         "X-Platia-Cost-Usd": f"{ctx.cost_usd:.8f}",
         "X-Platia-Latency-Ms": str(ctx.elapsed_ms()),
     })

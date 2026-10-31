@@ -2,7 +2,8 @@
 """Proveedor simulado para la prueba en Docker (scripts/prueba_docker.sh). No cuesta nada.
 
 Responde como Anthropic en `POST /v1/messages` y como OpenAI en
-`POST /v1/chat/completions`, siempre con el mismo texto, con o sin streaming (SSE). Exige la clave de
+`POST /v1/chat/completions`, siempre con el mismo texto, con o sin streaming (SSE). Para
+probar la reserva (G6), el modelo `caido` responde 503 y `saturado`, 429 con Retry-After. Exige la clave de
 `FAKE_PROVIDER_KEY` (en `x-api-key` o `Authorization: Bearer`), para comprobar que el
 gateway descifra y envía la del proveedor y no la del cliente. Solo biblioteca estándar.
 """
@@ -69,6 +70,13 @@ class Handler(BaseHTTPRequestHandler):
         given = self.headers.get("x-api-key") or self.headers.get("authorization", "").removeprefix("Bearer ")
         if given != KEY:
             self._reply(401, {"error": {"type": "authentication_error", "message": "clave incorrecta"}})
+        elif request.get("model") == "caido":
+            self._reply(503, {"error": {"type": "overloaded_error", "message": "servicio caído"}})
+        elif request.get("model") == "saturado":
+            self.send_response(429)
+            self.send_header("retry-after", "20")
+            self.send_header("content-length", "0")
+            self.end_headers()
         elif self.path == "/v1/messages" and request.get("stream"):
             self._stream(anthropic_events(request.get("model")))
         elif self.path == "/v1/chat/completions" and request.get("stream"):
