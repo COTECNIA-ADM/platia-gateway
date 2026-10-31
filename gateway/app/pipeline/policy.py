@@ -1,7 +1,7 @@
 """Etapa `policy`: qué puede pedir esta aplicación (cap. 2 y 13).
 
-En G3: propósito permitido y modelo conocido y permitido. Las cuotas, los presupuestos y
-los límites por minuto llegan en G7.
+Propósito permitido y modelo conocido y permitido. Las cuotas y los límites de ritmo son
+la etapa siguiente, `quota` (G7).
 """
 from sqlalchemy import select
 

@@ -69,6 +69,24 @@ cli show                                                                        
 La respuesta dice el modelo que respondió (`X-Platia-Model-Used`) y cuántos destinos se
 probaron (`X-Platia-Attempts`). Detalles y límites en [ADR-010](docs/adr/ADR-010-reserva-y-enfriamiento.md).
 
+## Cuotas y límites de ritmo
+
+Sin límites, el gateway no corta por gasto ni por ritmo. Cada límite se fija para la
+organización, un equipo, una aplicación o las personas de una aplicación:
+
+```bash
+cli set-limit --org cotecnia --metric cost_usd --period month --value 200            # techo mensual (USD)
+cli set-limit --org cotecnia --app platia --metric requests --period minute --value 120
+cli set-limit --org cotecnia --app platia --metric concurrent --value 10            # peticiones a la vez
+cli set-limit --org cotecnia --app platia --user '' --metric cost_usd --period day --value 5   # cada persona
+cli limits                                                                           # límites y consumo del periodo
+```
+
+Una cuota de día o de mes agotada devuelve 402 (`X-Platia-Quota-Reset` dice cuándo se
+renueva); un límite por minuto o de simultáneas, 429 con `Retry-After`. Al pasar el 80 %
+queda un aviso `quota.alert` en el log. Con límites, si Redis no responde, el gateway
+rechaza la petición (503). Detalles en [ADR-011](docs/adr/ADR-011-cuotas-y-limites.md).
+
 ## Conexión con PLATIA
 
 `bash scripts/alta_platia.sh` (con `ANTHROPIC_API_KEY` exportada) da de alta PLATIA con sus

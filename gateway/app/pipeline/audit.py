@@ -19,7 +19,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from ..contracts import Usage
-from ..errors import PermissionDenied, Unavailable
+from ..errors import PermissionDenied, QuotaExceeded, RateLimited, Unavailable
 from ..models import AuditLog, AuditStatus, ModelPrice
 from ..models.base import utcnow
 from .context import Deps, PipelineContext
@@ -78,7 +78,8 @@ async def close(ctx: PipelineContext, deps: Deps) -> None:
     if error is None:
         status = AuditStatus.SUCCESS
     else:
-        status = AuditStatus.BLOCKED if isinstance(error, PermissionDenied) else AuditStatus.ERROR
+        blocked = isinstance(error, PermissionDenied | QuotaExceeded | RateLimited)
+        status = AuditStatus.BLOCKED if blocked else AuditStatus.ERROR
     values = {"status": status, "http_status": error.status if error else 200,
               "error_type": error.kind if error else None, "completed_at": utcnow(), "latency_ms": ctx.elapsed_ms(),
               "input_tokens": usage.input, "output_tokens": usage.output, "cache_read_tokens": usage.cache_read,

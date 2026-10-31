@@ -6,6 +6,8 @@ limpiar): esos van al log con el `request_id`.
 
 Los tipos son los de la API de Anthropic, que los SDK de los dos contratos entienden.
 """
+import math
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
@@ -17,7 +19,8 @@ class GatewayError(Exception):
     kind: str = "api_error"
 
     def __init__(self, message: str, *, status: int | None = None, kind: str | None = None,
-                 fallback: bool = False, rate_limited: bool = False, retry_after: float | None = None):
+                 fallback: bool = False, rate_limited: bool = False, retry_after: float | None = None,
+                 headers: dict[str, str] | None = None):
         super().__init__(message)
         self.message = message
         if status is not None:
@@ -30,6 +33,8 @@ class GatewayError(Exception):
         # El proveedor dijo 429/529: el despliegue se enfría a la primera, Retry-After segundos si lo manda
         self.rate_limited = rate_limited
         self.retry_after = retry_after
+        # Cabeceras extra para el cliente (p. ej. cuándo se renueva una cuota, G7)
+        self.headers = headers or {}
 
 
 class InvalidRequest(GatewayError):
@@ -46,6 +51,16 @@ class PermissionDenied(GatewayError):
 
 class NotFound(GatewayError):
     status, kind = 404, "not_found_error"
+
+
+class QuotaExceeded(GatewayError):
+    """Cuota de un periodo (día o mes) agotada: no sirve reintentar hasta que se renueve (G7)."""
+    status, kind = 402, "billing_error"
+
+
+class RateLimited(GatewayError):
+    """Demasiadas peticiones, tokens o peticiones simultáneas: se puede reintentar en breve (G7)."""
+    status, kind = 429, "rate_limit_error"
 
 
 class RequestTooLarge(GatewayError):
@@ -77,8 +92,10 @@ def error_body(contract: Contract, error: GatewayError, request_id: str) -> dict
 
 
 def error_response(contract: Contract, error: GatewayError, request_id: str) -> JSONResponse:
-    return JSONResponse(error_body(contract, error, request_id), status_code=error.status,
-                        headers={"X-Request-ID": request_id})
+    headers = {"X-Request-ID": request_id, **error.headers}
+    if error.retry_after is not None:
+        headers["Retry-After"] = str(max(1, math.ceil(error.retry_after)))
+    return JSONResponse(error_body(contract, error, request_id), status_code=error.status, headers=headers)
 
 
 def contract_for(request: Request) -> Contract:

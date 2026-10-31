@@ -1,8 +1,8 @@
 """Contexto que comparten las etapas del pipeline y dependencias que reciben."""
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
 from decimal import Decimal
+from typing import Any
 from time import perf_counter
 
 import httpx
@@ -22,7 +22,7 @@ class Deps:
     sessions: Callable[[], AsyncSession]
     http: httpx.AsyncClient
     encryption_key: bytes | None
-    # Enfriamiento de despliegues (G6); None en los tests que no lo necesitan
+    # Enfriamiento de despliegues (G6) y cuotas (G7); None en los tests que no lo necesitan
     redis: Any = None
 
 
@@ -75,6 +75,8 @@ class PipelineContext:
     end_user_ref: str | None = None
     # policy (el modelo pedido) y execute (el que atiende, si hubo reserva)
     model: ModelInfo | None = None
+    # quota (G7): contadores admitidos, para ajustarlos al terminar (`quota.settle`)
+    quota: Any = None
     # route: destinos en el orden en que se prueban
     candidates: list[Candidate] = field(default_factory=list)
     # execute: el destino del intento en curso (o del último) y cuántos se han probado

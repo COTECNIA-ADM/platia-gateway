@@ -42,6 +42,8 @@ class AuditLog(Base):
     __table_args__ = (
         Index("ix_audit_logs_org_created", "organization_id", "created_at"),
         Index("ix_audit_logs_app_created", "application_id", "created_at"),
+        # Reconstruir los contadores de cuota de un equipo (G7)
+        Index("ix_audit_logs_team_created", "team_id", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
