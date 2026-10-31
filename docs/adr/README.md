@@ -10,3 +10,4 @@ descartaron. Para cambiar una decisión se escribe un ADR nuevo que sustituya al
 | [003](ADR-003-pipeline-de-etapas.md) | Pipeline de 8 etapas sobre un contexto compartido | Aceptado |
 | [004](ADR-004-identidad.md) | Organización, equipo, persona y aplicación con claves opacas; sin dispositivos | Aceptado |
 | [005](ADR-005-alcance-y-politica-de-fallo.md) | Alcance por bloques y fallar cerrado por defecto | Aceptado |
+| [006](ADR-006-modelo-de-datos.md) | Modelo de datos, claves con hash y secretos cifrados con AES-256-GCM | Aceptado |

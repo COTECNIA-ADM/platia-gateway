@@ -7,8 +7,8 @@ Alcance acordado: primero los bloques A y B (G0–G9).
 | # | Fase | Qué se construye | Capítulos | Estado |
 | --- | --- | --- | --- | --- |
 | G0 | Preparación | Estructura, FastAPI con `/health`, docker-compose (gateway, MySQL, Redis, Nginx), CI, aviso de licencia | 33–34 | Hecha |
-| G1 | Requisitos y arquitectura | `docs/requisitos.md`, `docs/arquitectura.md`, ADR de alcance y del reparto con PLATIA | 1–2, Ap. B y C | En curso |
-| G2 | Modelo de datos | Organización, equipo, persona, aplicación, claves, proveedores, despliegues, precios y auditoría; Alembic | 2, 32 | Pendiente |
+| G1 | Requisitos y arquitectura | `docs/requisitos.md`, `docs/arquitectura.md`, ADR de alcance y del reparto con PLATIA | 1–2, Ap. B y C | Hecha |
+| G2 | Modelo de datos | Organización, equipo, persona, aplicación, claves, proveedores, despliegues, precios y auditoría; Alembic | 2, 32 | En curso |
 | G3 | Contrato y pipeline mínimo | `/v1/messages` (Anthropic) y `/v1/chat/completions` (OpenAI) sin streaming; pipeline auth → route → execute → audit; adaptadores; claves API opacas | 1, 3, 7, 18 | Pendiente |
 | G4 | Streaming SSE | Streaming en los dos contratos, auditoría en `finally`, uso real del último fragmento | 4 | Pendiente |
 | G5 | Conexión con PLATIA | Red `llm_net`, proveedor «gateway» en `ai_service` tras `LLM_GATEWAY_ENABLED`, cabeceras de persona y tarea, comparación de costes | 26 | Pendiente |

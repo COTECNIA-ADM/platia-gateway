@@ -141,10 +141,34 @@ se falla cerrado; volver a la llamada directa es una decisión manual.
 
 ## Datos
 
-MySQL guarda la configuración (organizaciones, equipos, personas, aplicaciones, claves,
-proveedores, modelos, despliegues, precios, cuotas, reglas) y la auditoría. Redis guarda
-contadores de cuota y de límites, el estado de salud y enfriamiento de los despliegues y la
-revocación de claves. El modelo de datos se diseña en G2 con migraciones Alembic.
+MySQL guarda la configuración y la auditoría; Redis, los contadores de cuota y de límites,
+el estado de salud y enfriamiento de los despliegues y la revocación de claves. Las tablas
+se crean con migraciones Alembic ([ADR-006](adr/ADR-006-modelo-de-datos.md)).
+
+```mermaid
+erDiagram
+    organizations ||--o{ teams : tiene
+    organizations ||--o{ users : tiene
+    teams ||--o{ users : agrupa
+    teams ||--o{ applications : posee
+    applications ||--o{ api_keys : "claves plgw-app-"
+    users ||--o{ api_keys : "claves plgw-usr-"
+    providers ||--o{ deployments : sirve
+    llm_models ||--o{ deployments : "se despliega en"
+    llm_models ||--o{ model_prices : "precio desde"
+```
+
+| Tabla | Qué guarda | Fase en que se usa |
+| --- | --- | --- |
+| `organizations`, `teams`, `users` | Jerarquía de identidad; sal de auditoría por organización | G3, G10 |
+| `applications` | Clientes registrados: estado, confianza, propósitos y modelos permitidos | G3 |
+| `api_keys` | Hash y prefijo de cada clave, caducidad y revocación | G3 |
+| `providers` | Cuentas de proveedor con la clave cifrada (AES-256-GCM) | G3 |
+| `llm_models`, `deployments` | Modelos, sus funciones y dónde se sirven, con peso y prioridad | G3, G6 |
+| `model_prices` | USD por millón de tokens desde una fecha, incluida la caché | G7 |
+| `audit_logs` | Una fila por petición: quién, qué, resultado, tokens, coste, hashes | G3, G9 |
+
+`audit_logs` no tiene claves foráneas, para sobrevivir a cambios en la configuración.
 
 El texto de prompts y respuestas no se guarda en claro: la auditoría guarda hashes (con sal
 por organización), tokens, coste, latencia, modelo y decisiones de seguridad (G9).

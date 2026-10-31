@@ -11,6 +11,21 @@ permissions:
 jobs:
   gateway:
     runs-on: ubuntu-latest
+    # MySQL real para los tests de migraciones y restricciones (tests/test_models_db.py)
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root
+          MYSQL_DATABASE: platia_gateway
+          MYSQL_USER: gateway
+          MYSQL_PASSWORD: ci-pass
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-root"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      TEST_DATABASE_URL: mysql+pymysql://gateway:ci-pass@127.0.0.1:3306/platia_gateway
     defaults:
       run:
         working-directory: gateway
@@ -37,6 +52,8 @@ jobs:
           docker compose config -q
       - name: Levantar el gateway
         run: docker compose up -d --build --wait --wait-timeout 300
+      - name: Las migraciones se aplicaron
+        run: docker compose exec -T gateway alembic current | grep "(head)"
       - name: Comprobar /health a través de Nginx
         run: |
           curl -sf http://localhost:8090/health | grep '"status":"ok"'

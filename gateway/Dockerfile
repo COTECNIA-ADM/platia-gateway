@@ -10,6 +10,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 RUN useradd --create-home --uid 1000 app
 COPY app ./app
+COPY alembic.ini ./
+COPY migrations ./migrations
 RUN chown -R app:app /app
 USER app
 
