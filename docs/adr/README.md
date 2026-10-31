@@ -13,3 +13,4 @@ descartaron. Para cambiar una decisión se escribe un ADR nuevo que sustituya al
 | [006](ADR-006-modelo-de-datos.md) | Modelo de datos, claves con hash y secretos cifrados con AES-256-GCM | Aceptado |
 | [007](ADR-007-contrato-y-pipeline-minimo.md) | Contrato y pipeline mínimo: cuerpo sin esquema, traducción solo de texto, auditoría en dos pasos | Aceptado |
 | [008](ADR-008-streaming.md) | Streaming SSE con paso directo de eventos y auditoría al cerrar | Aceptado |
+| [009](ADR-009-conexion-platia.md) | Conexión con PLATIA por red interna, propósito libre, correlación por `X-Request-ID` y sin salto a la llamada directa | Aceptado |

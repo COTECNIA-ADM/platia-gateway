@@ -122,3 +122,25 @@ def test_clave_para_aplicacion_suspendida(settings, capsys, engine):
         db.commit()
     code, _, err = _run(settings, capsys, "create-key", "--org", "cotecnia", "--app", "otra")
     assert code == 1 and "no está activa" in err
+
+
+def test_consumo_por_proposito_y_modelo(settings, capsys, client, world):
+    headers = {"x-api-key": world.keys["platia"], "X-Platia-Purpose": "proposal_writer",
+               "X-Request-ID": "tarea-platia-0001"}
+    body = {"model": "claude-test", "max_tokens": 10, "messages": [{"role": "user", "content": "x"}]}
+    for _ in range(2):
+        assert client.post("/v1/messages", json=body, headers=headers).status_code == 200
+    code, out, _ = _run(settings, capsys, "usage", "--app", "platia", "--since", "2020-01-01",
+                        "--until", "2100-01-01", "--request-id", "tarea-platia-0001")
+    assert code == 0
+    line = next(row for row in out.splitlines() if row.startswith("proposal_writer"))
+    # 2 llamadas de 1000 entrada, 500 salida y 2000 de caché: 0,0111 USD cada una
+    assert line.split()[1:6] == ["claude-test", "2", "2", "2000", "1000"]
+    assert "Total: 0.022200 USD en 2 llamadas" in out
+    code, _, err = _run(settings, capsys, "usage", "--app", "no-existe")
+    assert code == 1 and "no-existe" in err
+
+
+def test_repetir_con_exists_ok(settings, capsys):
+    code, out, _ = _run(settings, capsys, "--exists-ok", "create-org", "--slug", "cotecnia", "--name", "Otra vez")
+    assert code == 0 and "Ya existía" in out

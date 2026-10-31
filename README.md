@@ -53,6 +53,16 @@ Las mismas rutas aceptan el contrato de OpenAI (`POST /v1/chat/completions`, cla
 `client.messages.stream(...)` del SDK de Anthropic y `stream=True` del de OpenAI. En
 streaming, el coste no va en una cabecera, pero queda en la auditoría.
 
+## Conexión con PLATIA
+
+`bash scripts/alta_platia.sh` (con `ANTHROPIC_API_KEY` exportada) da de alta PLATIA con sus
+modelos y precios y muestra la clave para su `.env`. PLATIA llama al gateway por la red
+interna `platia_llm_net` cuando tiene `LLM_GATEWAY_ENABLED=true`. Guía completa, comparación
+de costes y vuelta atrás en [`docs/conexion-platia.md`](docs/conexion-platia.md).
+
+`cli usage` resume la auditoría por tarea y modelo (`--app`, `--since`, `--until`,
+`--request-id`).
+
 ## Prueba en Docker sin coste
 
 ```bash
@@ -63,6 +73,9 @@ Arranca un proveedor simulado, da de alta una configuración nueva y comprueba l
 contratos con y sin streaming, los errores de identidad y permisos, las cabeceras y la
 auditoría. Si tienes instalados los SDK (`pip install anthropic openai`), los prueba también
 como los usará PLATIA. Se puede repetir: cada ejecución usa nombres nuevos.
+
+`PLATIA_DIR=../platia-dev bash scripts/prueba_platia.sh` prueba además la conexión con el
+`ai_service` real de PLATIA, por el gateway y con el interruptor apagado.
 
 ## Desarrollo
 
