@@ -49,7 +49,9 @@ La respuesta trae las cabeceras `X-Platia-Model-Used`, `X-Platia-Cost-Usd` y
 `cli show` resume lo dado de alta y `cli revoke-key --prefix ...` revoca una clave.
 
 Las mismas rutas aceptan el contrato de OpenAI (`POST /v1/chat/completions`, clave en
-`Authorization: Bearer`). Por ahora sin streaming: llega en G4.
+`Authorization: Bearer`). Las dos admiten streaming (`"stream": true`), así que funcionan
+`client.messages.stream(...)` del SDK de Anthropic y `stream=True` del de OpenAI. En
+streaming, el coste no va en una cabecera, pero queda en la auditoría.
 
 ## Prueba en Docker sin coste
 
@@ -58,8 +60,9 @@ bash scripts/prueba_docker.sh
 ```
 
 Arranca un proveedor simulado, da de alta una configuración nueva y comprueba los dos
-contratos, los errores de identidad y permisos, las cabeceras y la auditoría. Se puede
-repetir: cada ejecución usa nombres nuevos.
+contratos con y sin streaming, los errores de identidad y permisos, las cabeceras y la
+auditoría. Si tienes instalados los SDK (`pip install anthropic openai`), los prueba también
+como los usará PLATIA. Se puede repetir: cada ejecución usa nombres nuevos.
 
 ## Desarrollo
 

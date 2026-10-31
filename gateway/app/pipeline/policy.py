@@ -1,11 +1,11 @@
 """Etapa `policy`: qué puede pedir esta aplicación (cap. 2 y 13).
 
-En G3: propósito permitido, modelo conocido y permitido, y sin streaming. Las cuotas, los
-presupuestos y los límites por minuto llegan en G7.
+En G3: propósito permitido y modelo conocido y permitido. Las cuotas, los presupuestos y
+los límites por minuto llegan en G7.
 """
 from sqlalchemy import select
 
-from ..errors import InvalidRequest, NotFound, PermissionDenied
+from ..errors import NotFound, PermissionDenied
 from ..models import LlmModel
 from .context import Deps, ModelInfo, PipelineContext
 
@@ -14,8 +14,6 @@ async def run(ctx: PipelineContext, deps: Deps) -> None:
     identity = ctx.identity
     if ctx.purpose != "default" and ctx.purpose not in identity.allowed_purposes:
         raise PermissionDenied(f"La aplicación no tiene permitido el propósito '{ctx.purpose}'")
-    if ctx.stream:
-        raise InvalidRequest("El streaming todavía no está disponible en el gateway: envía stream=false")
 
     model_key = ctx.requested_model
     async with deps.sessions() as db:

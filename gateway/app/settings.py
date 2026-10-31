@@ -48,6 +48,8 @@ class Settings:
     provider_connect_timeout_seconds: float = field(
         default_factory=lambda: _float("PROVIDER_CONNECT_TIMEOUT_SECONDS", "10"))
     provider_timeout_seconds: float = field(default_factory=lambda: _float("PROVIDER_TIMEOUT_SECONDS", "300"))
+    # Duración máxima de una respuesta en streaming, aunque el proveedor siga enviando datos
+    stream_max_seconds: float = field(default_factory=lambda: _float("STREAM_MAX_SECONDS", "1800"))
     # Tamaño máximo del cuerpo de una petición (Nginx tiene su propio límite, igual o mayor)
     max_body_bytes: int = field(default_factory=lambda: _int("MAX_BODY_BYTES", str(10 * 1024 * 1024)))
 

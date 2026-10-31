@@ -23,7 +23,13 @@ log = structlog.get_logger(__name__)
 def prepare_body(ctx: PipelineContext, deployment: Deployment, provider: Provider) -> dict:
     """Cuerpo para el proveedor: el original si es su contrato; si no, traducido (o `Unsupported`)."""
     if native_contract(provider.kind) == ctx.contract:
-        return {**ctx.body, "model": deployment.upstream_model}
+        body = {**ctx.body, "model": deployment.upstream_model}
+        if ctx.stream and ctx.contract == Contract.OPENAI:
+            # Sin esto, OpenAI no manda el uso en streaming y la auditoría no tendría tokens
+            options = body.get("stream_options") if isinstance(body.get("stream_options"), dict) else {}
+            ctx.hide_usage_chunk = not options.get("include_usage")
+            body["stream_options"] = {**options, "include_usage": True}
+        return body
     neutral = from_anthropic(ctx.body) if ctx.contract == Contract.ANTHROPIC else from_openai(ctx.body)
     if ctx.contract == Contract.ANTHROPIC:
         return to_openai(neutral, deployment.upstream_model)

@@ -25,6 +25,7 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
   (`create-org`, `create-app`, `create-key`, `create-provider`, `create-model`, `create-deployment`,
   `set-price`, `revoke-key`, `show`)
 - Prueba en Docker sin coste (con la plataforma levantada): `bash scripts/prueba_docker.sh`
+  (con `pip install anthropic openai`, prueba también los SDK oficiales)
 - Estilo: `ruff check gateway` (configuración en `ruff.toml`); la CI exige además una
   cobertura mínima (`--cov-fail-under`, ver `.github/workflows/ci.yml`)
 
@@ -44,6 +45,9 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
   `run(ctx, deps)`; corta lanzando un error de `app/errors.py` y nunca llama a otra etapa.
   El orden está en `runner.py`. Entre familias iguales el cuerpo se reenvía tal cual; la
   traducción entre familias está en `contracts.py` y nunca degrada sin avisar.
+- Streaming (ADR-008): el código del proveedor se comprueba antes de responder; entre
+  familias iguales los eventos SSE se reenvían tal cual; la auditoría se cierra en el
+  `finally` del generador dentro de `anyio.CancelScope(shield=True)`.
 - Las cabeceras propias (`X-Platia-*`) y la clave del cliente nunca se reenvían al proveedor.
 - Cada fase llega en un PR con tests, `ruff` y cobertura en verde, y una prueba en Docker
   que se pueda repetir.
