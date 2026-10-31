@@ -1,0 +1,11 @@
+# Revisión de estilo; la CI la pasa en gateway/ (misma configuración que PLATIA).
+# Errores de sintaxis (E9), fallos de Pyflakes (F) y errores probables de bugbear (B).
+target-version = "py312"
+line-length = 120
+
+[lint]
+select = ["E9", "F", "B"]
+
+[lint.per-file-ignores]
+# FastAPI declara las dependencias como valor por defecto (Depends, Header, File...)
+"gateway/**" = ["B008"]
