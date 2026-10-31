@@ -3,8 +3,8 @@
 Gateway LLM corporativo: una sola puerta hacia los modelos de lenguaje para las
 aplicaciones internas (la primera, PLATIA, repo `cotecnia-adm/platia-dev`). Se construye
 por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el plan está en
-`docs/plan-fases.md`. Antes de diseñar algo nuevo, lee los capítulos de la fase y los ADR de
-`docs/adr/`. Una decisión de arquitectura nueva se documenta con un ADR.
+`docs/plan-fases.md`. Antes de diseñar algo nuevo, lee los capítulos de la fase,
+`docs/requisitos.md`, `docs/arquitectura.md` y los ADR de `docs/adr/`. Una decisión de arquitectura nueva se documenta con un ADR.
 
 ## Stack
 - **Gateway**: FastAPI asíncrono + SQLAlchemy 2 (aiomysql) — `gateway/`
