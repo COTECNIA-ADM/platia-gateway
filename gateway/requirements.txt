@@ -1,0 +1,9 @@
+fastapi~=0.115
+uvicorn[standard]~=0.34
+structlog~=25.1
+httpx~=0.28
+# MySQL asíncrono (SQLAlchemy 2 + aiomysql). cryptography: autenticación caching_sha2 de MySQL 8
+sqlalchemy[asyncio]~=2.0
+aiomysql~=0.3
+cryptography>=44
+redis~=5.2

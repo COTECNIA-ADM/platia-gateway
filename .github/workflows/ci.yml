@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gateway:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gateway
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      # Revisión de estilo con la configuración común de ruff.toml
+      - run: ruff check .
+      # Cobertura medida en cada PR; falla si baja del mínimo
+      - run: pytest -q --cov=app --cov-report=term-missing:skip-covered --cov-fail-under=85
+
+  compose:
+    # Levanta los 4 contenedores con un .env generado y comprueba que responden
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generar .env y validar docker-compose
+        run: |
+          python scripts/generate_env.py
+          docker compose config -q
+      - name: Levantar el gateway
+        run: docker compose up -d --build --wait --wait-timeout 300
+      - name: Comprobar /health a través de Nginx
+        run: |
+          curl -sf http://localhost:8090/health | grep '"status":"ok"'
+          # /health/ready no se publica fuera
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8090/health/ready)" = "404"
+      - name: Comprobar que MySQL y Redis responden desde el gateway
+        run: |
+          docker compose exec -T gateway python -c "import urllib.request, json; r = json.load(urllib.request.urlopen('http://127.0.0.1:8000/health/ready')); print(r); assert r['status'] == 'ok'"
+      - name: Logs de los contenedores
+        if: failure()
+        run: docker compose logs --no-color --tail=200
