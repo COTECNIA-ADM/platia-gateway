@@ -23,9 +23,11 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
   (vacía y recrea la base: nunca una con datos)
 - Alta de configuración (hasta el panel, G13): `docker compose run --rm migrations python -m app.cli <orden>`
   (`create-org`, `create-app`, `create-key`, `create-provider`, `create-model`, `create-deployment`,
-  `set-price`, `revoke-key`, `show`)
+  `set-price`, `revoke-key`, `show`, `usage`; `--exists-ok` para guiones que se repiten)
 - Prueba en Docker sin coste (con la plataforma levantada): `bash scripts/prueba_docker.sh`
   (con `pip install anthropic openai`, prueba también los SDK oficiales)
+- Conexión con PLATIA (G5): alta con `bash scripts/alta_platia.sh`; prueba conjunta con
+  `PLATIA_DIR=../platia-dev bash scripts/prueba_platia.sh`; guía en `docs/conexion-platia.md`
 - Estilo: `ruff check gateway` (configuración en `ruff.toml`); la CI exige además una
   cobertura mínima (`--cov-fail-under`, ver `.github/workflows/ci.yml`)
 

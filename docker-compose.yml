@@ -5,6 +5,8 @@
 #
 # Redes con mínimo privilegio: Nginx solo ve el gateway (edge_net) y los datos solo
 # los ve el gateway (data_net). MySQL y Redis no publican puertos.
+# llm_net (G5) es la red que comparte con PLATIA: su ai_service llama al gateway por ella
+# (http://platia-gateway:8000), sin pasar por Nginx ni salir del servidor.
 
 services:
   mysql:
@@ -91,7 +93,11 @@ services:
       start_period: 15s
     mem_limit: 512m
     restart: unless-stopped
-    networks: [edge_net, data_net]
+    networks:
+      edge_net:
+      data_net:
+      llm_net:
+        aliases: [platia-gateway]
 
   nginx:
     image: nginx:1.27-alpine
@@ -109,6 +115,9 @@ services:
 networks:
   edge_net:
   data_net:
+  # Nombre fijo: PLATIA la declara como externa en docker-compose.gateway.yml
+  llm_net:
+    name: platia_llm_net
 
 volumes:
   mysql_data:

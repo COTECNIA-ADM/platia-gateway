@@ -86,7 +86,8 @@ class Application(TimestampMixin, SoftDeleteMixin, Base):
         default=ApplicationStatus.ACTIVE, nullable=False)
     # De confianza: puede declarar la persona final con X-Platia-User-Id (ADR-004)
     trusted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    # Propósitos que puede declarar con X-Platia-Purpose. Lista vacía = solo "default".
+    # Propósitos que puede declarar con X-Platia-Purpose. Lista vacía = solo "default";
+    # ["*"] = cualquiera (aplicaciones que gobiernan sus propias tareas, como PLATIA).
     allowed_purposes: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     # Lista cerrada de modelos (model_key). NULL = los que permita la organización.
     allowed_models: Mapped[list | None] = mapped_column(JSON, nullable=True)

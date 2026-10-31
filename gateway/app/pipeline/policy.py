@@ -9,10 +9,15 @@ from ..errors import NotFound, PermissionDenied
 from ..models import LlmModel
 from .context import Deps, ModelInfo, PipelineContext
 
+# Comodín para aplicaciones con muchas tareas que gobiernan ellas mismas (PLATIA decide qué
+# tarea usa qué modelo y presupuesto): cualquier propósito con formato válido
+ANY_PURPOSE = "*"
+
 
 async def run(ctx: PipelineContext, deps: Deps) -> None:
     identity = ctx.identity
-    if ctx.purpose != "default" and ctx.purpose not in identity.allowed_purposes:
+    allowed = identity.allowed_purposes
+    if ctx.purpose != "default" and ANY_PURPOSE not in allowed and ctx.purpose not in allowed:
         raise PermissionDenied(f"La aplicación no tiene permitido el propósito '{ctx.purpose}'")
 
     model_key = ctx.requested_model

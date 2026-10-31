@@ -38,7 +38,9 @@ flowchart LR
 - **edge_net**: Nginx y el gateway. Nginx es el único con puerto publicado.
 - **data_net**: el gateway, MySQL y Redis. Ninguno de los dos publica puertos.
 - **llm_net** (G5): red Docker compartida con PLATIA para que `ai_service` llame al
-  gateway sin salir del servidor. Es una red externa que crean los dos `docker-compose`.
+  gateway sin salir del servidor. La crea el `docker-compose.yml` del gateway con el nombre
+  fijo `platia_llm_net` (alias del gateway: `platia-gateway`); PLATIA la declara externa en
+  su `docker-compose.gateway.yml` y solo une `ai_service` ([ADR-009](adr/ADR-009-conexion-platia.md)).
 
 ## Contratos de entrada
 
@@ -151,6 +153,11 @@ PLATIA sigue gobernando lo que es de su negocio y el gateway lo que es corporati
 pasar por el gateway cuando G4 esté hecho. En G5 se cambian solo la URL base y la clave del
 SDK de Anthropic, detrás de `LLM_GATEWAY_ENABLED`. Si el gateway no responde, por defecto
 se falla cerrado; volver a la llamada directa es una decisión manual.
+
+Cada llamada de PLATIA lleva su tarea (`X-Platia-Purpose`), la persona
+(`X-Platia-User-Id`) y su `correlation_id` como `X-Request-ID`, así que una fila de
+`llm_usage_log` y una de `audit_logs` se cruzan por ese id. Puesta en marcha, comparación de
+costes y vuelta atrás: [conexion-platia.md](conexion-platia.md).
 
 ## Datos
 

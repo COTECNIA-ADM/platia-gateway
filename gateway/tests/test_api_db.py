@@ -269,3 +269,12 @@ def test_error_inesperado_da_500_sin_detalles(client, world, engine, monkeypatch
     assert response.json()["error"]["type"] == "api_error"
     [row] = _audit(engine)
     assert (row.status, row.http_status) == ("error", 500)
+
+
+def test_comodin_de_propositos(client, world, engine):
+    _set(engine, "UPDATE applications SET allowed_purposes = '[\"*\"]' WHERE slug = 'otra'")
+    response = client.post("/v1/chat/completions", json=_openai_body(),
+                           headers={"Authorization": f"Bearer {world.keys['otra']}",
+                                    "X-Platia-Purpose": "agent_copilot"})
+    assert response.status_code == 200
+    assert _audit(engine)[-1].purpose == "agent_copilot"

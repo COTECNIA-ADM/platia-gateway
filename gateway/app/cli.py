@@ -5,7 +5,8 @@ Uso dentro de Docker (el contenedor de migraciones tiene acceso a MySQL):
     docker compose run --rm migrations python -m app.cli <orden> [opciones]
 
 Órdenes: create-org, create-team, create-app, create-key, revoke-key, create-provider,
-create-model, create-deployment, set-price y show. `python -m app.cli <orden> -h`
+create-model, create-deployment, set-price, show y usage (consumo y coste, para compararlo
+con lo que registra PLATIA). `python -m app.cli <orden> -h`
 explica cada una.
 
 La clave de un proveedor nunca va como argumento (quedaría en el historial de la shell):
@@ -20,13 +21,13 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import case, create_engine, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .crypto import encrypt, load_key
 from .keys import new_application_key
-from .models import (ApiKey, Application, ApplicationStatus, Deployment, KeyKind, LlmModel, ModelFamily, ModelPrice,
+from .models import (ApiKey, Application, ApplicationStatus, AuditLog, AuditStatus, Deployment, KeyKind, LlmModel, ModelFamily, ModelPrice,
                      Organization, Provider, ProviderKind, Team)
 from .models.base import utcnow
 from .settings import Settings
@@ -192,8 +193,43 @@ def show(db: Session, args, settings: Settings) -> None:
              f"[prioridad {deployment.priority}, peso {deployment.weight}]")
 
 
+def usage(db: Session, args, settings: Settings) -> None:
+    """Llamadas, tokens y coste por propósito y modelo, a partir de la auditoría."""
+    filters = []
+    if args.app:
+        app_ids = [a.id for a in db.execute(select(Application).where(Application.slug == args.app)).scalars()]
+        if not app_ids:
+            raise CliError(f"No existe ninguna aplicación '{args.app}'")
+        filters.append(AuditLog.application_id.in_(app_ids))
+    if args.since:
+        filters.append(AuditLog.created_at >= datetime.fromisoformat(args.since))
+    if args.until:
+        filters.append(AuditLog.created_at < datetime.fromisoformat(args.until))
+    if args.request_id:
+        filters.append(AuditLog.request_id == args.request_id)
+    rows = db.execute(
+        select(AuditLog.purpose, AuditLog.model_key, func.count(),
+               func.sum(case((AuditLog.status == AuditStatus.SUCCESS, 1), else_=0)),
+               func.sum(AuditLog.input_tokens), func.sum(AuditLog.output_tokens),
+               func.sum(AuditLog.cache_read_tokens), func.sum(AuditLog.cache_write_tokens), func.sum(AuditLog.cost_usd))
+        .where(*filters).group_by(AuditLog.purpose, AuditLog.model_key)
+        .order_by(AuditLog.purpose, AuditLog.model_key)
+    ).all()
+    _out(f"{'propósito':<24} {'modelo':<22} {'llamadas':>8} {'ok':>6} {'entrada':>10} {'salida':>10} "
+         f"{'caché lee':>10} {'caché esc':>10} {'USD':>12}")
+    total = Decimal("0")
+    for purpose, model, calls, ok, tin, tout, cread, cwrite, cost in rows:
+        cost = Decimal(cost or 0)
+        total += cost
+        _out(f"{(purpose or '-')[:24]:<24} {(model or '-')[:22]:<22} {calls:>8} {int(ok or 0):>6} {int(tin or 0):>10} "
+             f"{int(tout or 0):>10} {int(cread or 0):>10} {int(cwrite or 0):>10} {cost:>12.6f}")
+    _out(f"Total: {total:.6f} USD en {sum(r[2] for r in rows)} llamadas")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m app.cli", description="Configuración del PLATIA Gateway")
+    parser.add_argument("--exists-ok", action="store_true",
+                        help="Si lo que se crea ya existe, no es un error (para guiones que se repiten)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("create-org", help="Crear una organización")
@@ -214,7 +250,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--slug", required=True)
     p.add_argument("--name", required=True)
     p.add_argument("--trusted", action="store_true", help="Puede declarar la persona final (X-Platia-User-Id)")
-    p.add_argument("--purpose", action="append", help="Propósito permitido (repetible); 'default' siempre lo está")
+    p.add_argument("--purpose", action="append", help="Propósito permitido (repetible); 'default' siempre lo está y '*' permite cualquiera")
     p.add_argument("--model", action="append", help="Modelo permitido (repetible); sin él, todos")
     p.set_defaults(handler=create_app)
 
@@ -267,6 +303,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("show", help="Resumen de organizaciones, aplicaciones y modelos")
     p.set_defaults(handler=show)
+
+    p = sub.add_parser("usage", help="Llamadas, tokens y coste por propósito y modelo (auditoría)")
+    p.add_argument("--app", help="Slug de la aplicación (p. ej. platia)")
+    p.add_argument("--since", help="Desde (fecha ISO en UTC, incluida)")
+    p.add_argument("--until", help="Hasta (fecha ISO en UTC, excluida)")
+    p.add_argument("--request-id", help="Solo una petición o tarea (en PLATIA, su correlation_id)")
+    p.set_defaults(handler=usage)
     return parser
 
 
@@ -282,6 +325,9 @@ def main(argv: Sequence[str] | None = None, settings: Settings | None = None) ->
         sys.stderr.write(f"Error: {exc}\n")
         return 1
     except IntegrityError:
+        if args.exists_ok:
+            _out("Ya existía: se deja como estaba")
+            return 0
         sys.stderr.write("Error: ya existe un registro con esos datos (slug, clave o fecha repetidos)\n")
         return 1
     finally:
