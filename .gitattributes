@@ -1,0 +1,8 @@
+# Finales de línea LF en todo el repositorio, también al clonar en Windows: los guiones
+# de scripts/ se ejecutan con bash y fallan si llegan con CRLF.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary

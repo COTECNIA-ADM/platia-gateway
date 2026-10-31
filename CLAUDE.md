@@ -23,7 +23,8 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
   (vacía y recrea la base: nunca una con datos)
 - Alta de configuración (hasta el panel, G13): `docker compose run --rm migrations python -m app.cli <orden>`
   (`create-org`, `create-app`, `create-key`, `create-provider`, `create-model`, `create-deployment`,
-  `set-price`, `revoke-key`, `show`, `usage`; `--exists-ok` para guiones que se repiten)
+  `set-price`, `set-fallbacks`, `set-deployment`, `revoke-key`, `show`, `usage`; `--exists-ok` para
+  guiones que se repiten)
 - Prueba en Docker sin coste (con la plataforma levantada): `bash scripts/prueba_docker.sh`
   (con `pip install anthropic openai`, prueba también los SDK oficiales)
 - Conexión con PLATIA (G5): alta con `bash scripts/alta_platia.sh`; prueba conjunta con
@@ -51,6 +52,9 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
   familias iguales los eventos SSE se reenvían tal cual; la auditoría se cierra en el
   `finally` del generador dentro de `anyio.CancelScope(shield=True)`.
 - Las cabeceras propias (`X-Platia-*`) y la clave del cliente nunca se reenvían al proveedor.
+- Reserva (ADR-010): `route` ordena los destinos y `execute` los recorre. Un error del adaptador
+  que deba cambiar de destino lleva `fallback=True`; los de la petición (400) nunca. La reserva
+  solo usa modelos que la aplicación tiene permitidos.
 - Cada fase llega en un PR con tests, `ruff` y cobertura en verde, y una prueba en Docker
   que se pueda repetir.
 - No exponer MySQL ni Redis fuera de `data_net`. Nginx solo publica las rutas que tocan.

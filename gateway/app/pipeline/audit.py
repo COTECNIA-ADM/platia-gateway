@@ -82,7 +82,11 @@ async def close(ctx: PipelineContext, deps: Deps) -> None:
     values = {"status": status, "http_status": error.status if error else 200,
               "error_type": error.kind if error else None, "completed_at": utcnow(), "latency_ms": ctx.elapsed_ms(),
               "input_tokens": usage.input, "output_tokens": usage.output, "cache_read_tokens": usage.cache_read,
-              "cache_write_tokens": usage.cache_write}
+              "cache_write_tokens": usage.cache_write, "attempts": ctx.attempts,
+              # Con reserva, el destino final puede no ser el de la apertura (G6)
+              "model_key": ctx.model.key if ctx.model else None,
+              "deployment_id": ctx.target.deployment_id if ctx.target else None,
+              "provider_slug": ctx.target.provider_slug if ctx.target else None}
     try:
         async with deps.sessions() as db:
             if ctx.model is not None and (usage.input or usage.output or usage.cache_read or usage.cache_write):
@@ -94,7 +98,7 @@ async def close(ctx: PipelineContext, deps: Deps) -> None:
                 ctx.cost_usd = compute_cost(usage, price)
             values["cost_usd"] = ctx.cost_usd
             if ctx.audit_id is None:
-                db.add(AuditLog(**_who(ctx), **values))
+                db.add(AuditLog(**{**_who(ctx), **values}))
             else:
                 await db.execute(update(AuditLog).where(AuditLog.id == ctx.audit_id).values(**values))
             await db.commit()

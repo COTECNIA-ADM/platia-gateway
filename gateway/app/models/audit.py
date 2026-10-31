@@ -77,6 +77,8 @@ class AuditLog(Base):
     cache_write_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     cost_usd: Mapped[Decimal] = mapped_column(Numeric(14, 8), default=Decimal("0"), nullable=False)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Destinos probados (G6): más de 1 si hubo reserva; deployment_id y model_key son los del último
+    attempts: Mapped[int] = mapped_column(SmallInteger, default=1, server_default="1", nullable=False)
 
     # Huella del contenido, sin el contenido
     prompt_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)

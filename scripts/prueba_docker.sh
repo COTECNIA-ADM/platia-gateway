@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Prueba en Docker del contrato de inferencia (G3) y del streaming (G4), repetible y sin coste.
+# Prueba en Docker del contrato de inferencia (G3), del streaming (G4) y de la reserva (G6),
+# repetible y sin coste.
 #
 # Requisito: la plataforma levantada (docker compose up -d --build --wait).
 # Uso:       bash scripts/prueba_docker.sh
@@ -43,6 +44,13 @@ cli create-model --key "gpt-$RUN" --name "GPT simulado" --family openai
 cli create-deployment --model "claude-$RUN" --provider "anthropic-$RUN" --upstream claude-real
 cli create-deployment --model "gpt-$RUN" --provider "openai-$RUN" --upstream gpt-real
 cli set-price --model "claude-$RUN" --input 3 --output 15 --since 2020-01-01
+# Reserva (G6): un modelo cuyo primer despliegue está caído y el segundo responde, y otro
+# cuyo único despliegue está saturado, con gpt-$RUN como modelo de reserva
+cli create-model --key "doble-$RUN" --name "Dos despliegues" --family anthropic
+cli create-deployment --model "doble-$RUN" --provider "anthropic-$RUN" --upstream caido --priority 0
+cli create-deployment --model "doble-$RUN" --provider "anthropic-$RUN" --upstream claude-real --priority 1
+cli create-model --key "roto-$RUN" --name "Saturado" --family anthropic --fallback "gpt-$RUN"
+cli create-deployment --model "roto-$RUN" --provider "anthropic-$RUN" --upstream saturado
 KEY="$(cli create-key --org "$RUN" --app platia --label prueba | tail -n 1)"
 
 check() { # descripción, código esperado, respuesta (código en la última línea)
@@ -95,6 +103,20 @@ out="$(curl -sN -w '\n%{http_code}' "$BASE/v1/chat/completions" -H "Authorizatio
 check "Streaming OpenAI → OpenAI" 200 "$out"
 if grep -q '"usage"' <<<"$out"; then echo "FALLO: se reenvió el uso que el cliente no pidió"; exit 1; fi
 
+echo "== Reserva y enfriamiento"
+out="$(curl -s -w '\n%{http_code}' "$BASE/v1/messages" -H "x-api-key: $KEY" -D /tmp/platia-headers \
+  -d "{\"model\":\"doble-$RUN\",\"max_tokens\":50,\"messages\":[{\"role\":\"user\",\"content\":\"Hola\"}]}")"
+check "Primer despliegue caído → responde el segundo" 200 "$out"
+grep -qi "x-platia-attempts: 2" /tmp/platia-headers
+out="$(curl -sN -w '\n%{http_code}' "$BASE/v1/messages" -H "x-api-key: $KEY" -D /tmp/platia-headers \
+  -d "{\"model\":\"roto-$RUN\",\"max_tokens\":50,\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Hola\"}]}")"
+check "Modelo saturado → su reserva de otra familia, en streaming" 200 "$out"
+grep -qi "x-platia-model-used: gpt-$RUN" /tmp/platia-headers
+grep -q "event: message_stop" <<<"$out"
+deployment="$(docker compose exec -T redis sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --scan --pattern "gw:cooldown:*"' | head -n 5)"
+[ -n "$deployment" ] || { echo "FALLO: el 429 no enfrió el despliegue"; exit 1; }
+echo "ok: el 429 enfrió el despliegue saturado ($(tr '\n' ' ' <<<"$deployment"))"
+
 PY="${PYTHON:-python3}"
 if "$PY" -c "import anthropic, openai" 2>/dev/null; then
   echo "== SDK oficiales"
@@ -127,7 +149,8 @@ async def main():
     async with engine.connect() as conn:
         row = (await conn.execute(text(
             "SELECT SUM(status = 'success'), SUM(status = 'success' AND stream), SUM(status = 'blocked'),"
-            " SUM(status NOT IN ('success', 'blocked')), SUM(end_user_ref = '42'), SUM(output_tokens)"
+            " SUM(status NOT IN ('success', 'blocked')), SUM(end_user_ref = '42'), SUM(output_tokens),"
+            " SUM(attempts > 1)"
             " FROM audit_logs WHERE api_key_prefix = :p"), {"p": sys.argv[1]})).one()
     await engine.dispose()
     print(" ".join(str(int(v or 0)) for v in row))
@@ -135,12 +158,12 @@ async def main():
 asyncio.run(main())
 PY
 )"
-# correctas, de ellas en streaming, bloqueadas, otras, con persona 42, tokens de salida
-read -r ok streamed blocked other person tokens <<<"$summary"
-expected_ok=$((6 + SDK_CALLS))
-echo "correctas=$ok streaming=$streamed bloqueadas=$blocked otras=$other persona42=$person"
+# correctas, de ellas en streaming, bloqueadas, otras, con persona 42, tokens de salida, con reserva
+read -r ok streamed blocked other person tokens fallbacks <<<"$summary"
+expected_ok=$((8 + SDK_CALLS))
+echo "correctas=$ok streaming=$streamed bloqueadas=$blocked otras=$other persona42=$person con_reserva=$fallbacks"
 if [ "$ok" != "$expected_ok" ] || [ "$blocked" != 1 ] || [ "$other" != 0 ] || [ "$person" != 1 ] \
-   || [ "$streamed" -lt 3 ] || [ "$tokens" -le 0 ]; then
+   || [ "$streamed" -lt 4 ] || [ "$tokens" -le 0 ] || [ "$fallbacks" != 2 ]; then
   echo "FALLO: auditoría (se esperaban $expected_ok correctas, 1 bloqueada y ninguna pendiente)"; exit 1
 fi
 echo "ok: cada llamada auditada, también las de streaming; sin texto de la conversación"

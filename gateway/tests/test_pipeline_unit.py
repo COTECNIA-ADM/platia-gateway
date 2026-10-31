@@ -11,7 +11,7 @@ from app.main import create_app
 from app.models import Contract, ModelPrice
 from app.pipeline import auth
 from app.pipeline.audit import compute_cost
-from app.pipeline.route import pick, provider_key
+from app.pipeline.route import order, provider_key
 from app.settings import Settings
 
 
@@ -48,11 +48,17 @@ def _d(id_, priority, weight):
     return SimpleNamespace(id=id_, priority=priority, weight=weight)
 
 
-def test_reparto_por_prioridad_y_peso():
-    eligible = [(_d(1, 1, 100), None, {}), (_d(2, 0, 0), None, {}), (_d(3, 0, 100), None, {})]
-    assert {pick(eligible)[0].id for _ in range(30)} == {3}
-    # Todos con peso 0 en el mejor nivel: el primero
-    assert pick([(_d(4, 0, 0), None, {}), (_d(5, 0, 0), None, {})])[0].id == 4
+def test_orden_por_prioridad_y_peso():
+    deployments = [_d(1, 1, 100), _d(2, 0, 0), _d(3, 0, 100), _d(4, 0, 300)]
+    firsts = set()
+    for _ in range(60):
+        ids = [d.id for d in order(deployments)]
+        # Prioridad 0 antes que 1; dentro de la 0, el de peso 0 al final (solo como reserva)
+        assert ids[2:] == [2, 1] and set(ids[:2]) == {3, 4}
+        firsts.add(ids[0])
+    assert firsts == {3, 4}  # el peso reparte, pero los dos salen primeros alguna vez
+    # Todos con peso 0: en el orden recibido
+    assert [d.id for d in order([_d(5, 0, 0), _d(6, 0, 0)])] == [5, 6]
 
 
 def test_proveedor_sin_clave_o_sin_clave_de_cifrado():

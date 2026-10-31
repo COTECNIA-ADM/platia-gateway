@@ -29,4 +29,6 @@ async def run(ctx: PipelineContext, deps: Deps) -> None:
         raise NotFound(f"Modelo desconocido: {model_key[:128]}")
     if identity.allowed_models is not None and model.model_key not in identity.allowed_models:
         raise PermissionDenied(f"La aplicación no tiene permitido el modelo '{model.model_key}'")
-    ctx.model = ModelInfo(id=model.id, key=model.model_key, max_output_tokens=model.max_output_tokens)
+    fallbacks = tuple(k for k in (model.fallback_models or []) if isinstance(k, str) and k != model.model_key)
+    ctx.model = ModelInfo(id=model.id, key=model.model_key, max_output_tokens=model.max_output_tokens,
+                          fallbacks=fallbacks)

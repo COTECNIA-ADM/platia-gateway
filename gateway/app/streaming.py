@@ -304,6 +304,7 @@ def streaming_response(ctx: PipelineContext, deps: Deps, upstream: httpx.Respons
     return StreamingResponse(relay_stream(ctx, deps, upstream), media_type="text/event-stream", headers={
         "X-Request-ID": ctx.request_id,
         "X-Platia-Model-Used": ctx.model.key,
+        "X-Platia-Attempts": str(ctx.attempts),
         "Cache-Control": "no-cache",
         # Que Nginx no acumule la respuesta: cada evento sale en cuanto llega
         "X-Accel-Buffering": "no",

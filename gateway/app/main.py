@@ -28,8 +28,9 @@ log = structlog.get_logger(__name__)
 
 
 def create_app(settings: Settings | None = None, checks: dict[str, Check] | None = None,
-               transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
-    """Crea la aplicación. `checks` y `transport` sustituyen la salud y los proveedores reales (tests)."""
+               transport: httpx.AsyncBaseTransport | None = None, redis_client=None) -> FastAPI:
+    """Crea la aplicación. `checks`, `transport` y `redis_client` sustituyen la salud, los
+    proveedores y Redis reales (tests)."""
     settings = settings or get_settings()
     configure_logging(settings.log_level, settings.log_format)
     # Una clave mal escrita impide arrancar: mejor que descubrirlo en la primera petición
@@ -41,13 +42,15 @@ def create_app(settings: Settings | None = None, checks: dict[str, Check] | None
         # MySQL o Redis estén listos; /health/ready dice cuándo lo están.
         engine = create_async_engine(settings.database_url, pool_pre_ping=True, pool_recycle=3600,
                                      pool_size=settings.db_pool_size, max_overflow=settings.db_max_overflow)
-        redis = Redis(host=settings.redis_host, port=settings.redis_port, db=settings.redis_db,
-                      password=settings.redis_password or None, socket_timeout=settings.health_timeout_seconds)
+        redis = redis_client if redis_client is not None else Redis(
+            host=settings.redis_host, port=settings.redis_port, db=settings.redis_db,
+            password=settings.redis_password or None, socket_timeout=settings.health_timeout_seconds,
+            socket_connect_timeout=settings.health_timeout_seconds)
         http = httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(
             settings.provider_timeout_seconds, connect=settings.provider_connect_timeout_seconds))
         app.state.checks = checks if checks is not None else {
             "mysql": partial(ping_mysql, engine), "redis": partial(ping_redis, redis)}
-        app.state.deps = Deps(settings=settings, http=http, encryption_key=encryption_key,
+        app.state.deps = Deps(settings=settings, http=http, encryption_key=encryption_key, redis=redis,
                               sessions=async_sessionmaker(engine, expire_on_commit=False))
         if encryption_key is None:
             log.warning("gateway.no_encryption_key", detail="sin ENCRYPTION_KEY no se pueden usar proveedores con clave")

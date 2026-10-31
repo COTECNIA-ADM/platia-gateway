@@ -10,6 +10,7 @@ import os
 from decimal import Decimal
 from pathlib import Path
 
+import fakeredis
 import httpx
 import pytest
 from alembic import command
@@ -117,7 +118,7 @@ class Upstream:
             raise reply
         if reply is not None:
             return reply
-        anthropic = request.url.host == "anthropic.test"
+        anthropic = request.url.host != "openai.test"  # los demás hosts de prueba son de Anthropic
         if json.loads(request.content).get("stream"):
             return httpx.Response(200, content=ANTHROPIC_SSE if anthropic else OPENAI_SSE,
                                   headers={"content-type": "text/event-stream"})
@@ -179,9 +180,15 @@ def upstream():
 
 
 @pytest.fixture
-def client(world, upstream):
+def redis_fake():
+    return fakeredis.FakeAsyncRedis()
+
+
+@pytest.fixture
+def client(world, upstream, redis_fake):
     url = make_url(URL)
     settings = Settings(db_host=url.host, db_port=url.port or 3306, db_user=url.username, db_password=url.password,
                         db_name=url.database, encryption_key=KEY_B64, log_format="console")
-    with TestClient(create_app(settings, transport=httpx.MockTransport(upstream))) as test_client:
+    with TestClient(create_app(settings, transport=httpx.MockTransport(upstream),
+                               redis_client=redis_fake)) as test_client:
         yield test_client
