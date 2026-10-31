@@ -1,0 +1,23 @@
+# Secretos: nunca al repositorio
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+dist/
+
+# Editores y sistema
+.vscode/
+.idea/
+.DS_Store
