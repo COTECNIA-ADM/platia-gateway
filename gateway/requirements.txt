@@ -6,6 +6,8 @@ httpx~=0.28
 # MySQL 8 y cifrado AES-256-GCM de secretos
 sqlalchemy[asyncio]~=2.0
 aiomysql~=0.3
+# Driver síncrono para la línea de comandos (python -m app.cli) y los tests
+pymysql~=1.1
 cryptography>=44
 # Migraciones del esquema (desde G2)
 alembic~=1.14

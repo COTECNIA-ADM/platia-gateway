@@ -1,17 +1,9 @@
-"""Migraciones y restricciones contra un MySQL 8 real.
-
-Necesitan `TEST_DATABASE_URL` (driver síncrono), por ejemplo
-`mysql+pymysql://gateway:pass@127.0.0.1:3307/platia_gateway`. La base se vacía y se
-recrea con Alembic: no apuntes nunca a una base con datos. La CI siempre la define.
-"""
+"""Migraciones y restricciones contra un MySQL 8 real (ver `conftest.py`)."""
 import hashlib
-import os
-from pathlib import Path
 
 import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
-from alembic.config import Config
 from alembic.migration import MigrationContext
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.exc import DBAPIError, IntegrityError
@@ -20,20 +12,12 @@ from sqlalchemy.orm import Session
 from app.models import (ApiKey, Application, AuditLog, Base, Contract, Deployment, KeyKind, LlmModel,
                         ModelFamily, ModelPrice, Organization, Provider, ProviderKind, Team, User)
 
-URL = os.environ.get("TEST_DATABASE_URL")
-pytestmark = pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL no definida (la CI la define)")
+from .conftest import URL, needs_db
+from .conftest import alembic_config as _alembic
 
-GATEWAY_DIR = Path(__file__).resolve().parent.parent
+pytestmark = needs_db
 TABLES = {"organizations", "teams", "users", "applications", "api_keys", "providers", "llm_models",
           "deployments", "model_prices", "audit_logs"}
-
-
-def _alembic(connection) -> Config:
-    cfg = Config(str(GATEWAY_DIR / "alembic.ini"))
-    cfg.set_main_option("script_location", str(GATEWAY_DIR / "migrations"))
-    cfg.attributes["connection"] = connection
-    cfg.attributes["configure_logger"] = False
-    return cfg
 
 
 @pytest.fixture(scope="module")
