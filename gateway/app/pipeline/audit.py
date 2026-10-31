@@ -6,6 +6,7 @@ Se escribe en dos pasos (ADR-005):
    petición no sale (fallar cerrado: no hay gasto sin registro).
 2. **Cierre**: tokens, coste, latencia y estado. Si falla, la respuesta ya está pagada y se
    entrega igual; queda en el log como `audit.close_failed` (la conciliación llega en G9).
+   En streaming se cierra al terminar el envío, también si el cliente se desconecta.
 
 Las peticiones rechazadas después de identificar la aplicación también quedan registradas
 (`blocked` o `error`). Las que no llegan a identificarse solo van al log. Nunca se guarda
@@ -64,36 +65,34 @@ async def open_record(ctx: PipelineContext, deps: Deps) -> None:
         raise Unavailable("No se puede registrar la petición; no se ha enviado al proveedor") from exc
 
 
-async def close_success(ctx: PipelineContext, deps: Deps) -> None:
-    usage = ctx.usage
-    try:
-        async with deps.sessions() as db:
-            price = (await db.execute(
-                select(ModelPrice).where(ModelPrice.model_id == ctx.model.id, ModelPrice.effective_from <= utcnow())
-                .order_by(ModelPrice.effective_from.desc()).limit(1)
-            )).scalar_one_or_none()
-            ctx.cost_usd = compute_cost(usage, price)
-            await db.execute(update(AuditLog).where(AuditLog.id == ctx.audit_id).values(
-                status=AuditStatus.SUCCESS, http_status=200, completed_at=utcnow(), latency_ms=ctx.elapsed_ms(),
-                input_tokens=usage.input, output_tokens=usage.output, cache_read_tokens=usage.cache_read,
-                cache_write_tokens=usage.cache_write, cost_usd=ctx.cost_usd))
-            await db.commit()
-    except SQLAlchemyError as exc:
-        log.error("audit.close_failed", request_id=ctx.request_id, audit_id=ctx.audit_id,
-                  error_type=type(exc).__name__, input_tokens=usage.input, output_tokens=usage.output)
-    ctx.finished = True
+async def close(ctx: PipelineContext, deps: Deps) -> None:
+    """Cierra la fila (o la crea, si el corte llegó antes de abrirla) con el resultado, los tokens y el coste.
 
-
-async def close_failure(ctx: PipelineContext, deps: Deps) -> None:
-    """Registra un corte o un error. Sin identidad no hay organización a la que atribuirlo: solo log."""
-    error = ctx.error
+    Sin identidad no hay organización a la que atribuir la petición: solo queda en el log.
+    Un fallo aquí no cambia la respuesta (ya está entregada o pagada): va al log como
+    `audit.close_failed` para conciliarlo (G9).
+    """
     if ctx.identity is None:
         return
-    values = {"status": AuditStatus.BLOCKED if isinstance(error, PermissionDenied) else AuditStatus.ERROR,
-              "http_status": error.status, "error_type": error.kind, "completed_at": utcnow(),
-              "latency_ms": ctx.elapsed_ms()}
+    error, usage = ctx.error, ctx.usage
+    if error is None:
+        status = AuditStatus.SUCCESS
+    else:
+        status = AuditStatus.BLOCKED if isinstance(error, PermissionDenied) else AuditStatus.ERROR
+    values = {"status": status, "http_status": error.status if error else 200,
+              "error_type": error.kind if error else None, "completed_at": utcnow(), "latency_ms": ctx.elapsed_ms(),
+              "input_tokens": usage.input, "output_tokens": usage.output, "cache_read_tokens": usage.cache_read,
+              "cache_write_tokens": usage.cache_write}
     try:
         async with deps.sessions() as db:
+            if ctx.model is not None and (usage.input or usage.output or usage.cache_read or usage.cache_write):
+                price = (await db.execute(
+                    select(ModelPrice).where(ModelPrice.model_id == ctx.model.id,
+                                             ModelPrice.effective_from <= utcnow())
+                    .order_by(ModelPrice.effective_from.desc()).limit(1)
+                )).scalar_one_or_none()
+                ctx.cost_usd = compute_cost(usage, price)
+            values["cost_usd"] = ctx.cost_usd
             if ctx.audit_id is None:
                 db.add(AuditLog(**_who(ctx), **values))
             else:
@@ -101,4 +100,4 @@ async def close_failure(ctx: PipelineContext, deps: Deps) -> None:
             await db.commit()
     except SQLAlchemyError as exc:
         log.error("audit.close_failed", request_id=ctx.request_id, audit_id=ctx.audit_id,
-                  error_type=type(exc).__name__)
+                  error_type=type(exc).__name__, input_tokens=usage.input, output_tokens=usage.output)

@@ -47,6 +47,7 @@ class Neutral:
     temperature: float | None = None
     top_p: float | None = None
     stop: list[str] = field(default_factory=list)
+    stream: bool = False
 
 
 # --- Validación mínima común (el proveedor valida el resto)
@@ -102,11 +103,12 @@ def from_anthropic(body: dict) -> Neutral:
     return Neutral(messages=messages,
                    system=_texts(system, allowed_extra=_CACHE_HINT) if system is not None else None,
                    max_tokens=body.get("max_tokens"), temperature=body.get("temperature"),
-                   top_p=body.get("top_p"), stop=list(stop))
+                   top_p=body.get("top_p"), stop=list(stop), stream=bool(body.get("stream")))
 
 
+# stream_options solo pide el uso al final: el gateway lo pide siempre al proveedor
 _OPENAI_PORTABLE = {"model", "messages", "max_tokens", "max_completion_tokens", "temperature", "top_p", "stop",
-                    "stream", "user", "n"}
+                    "stream", "stream_options", "user", "n"}
 
 
 def from_openai(body: dict) -> Neutral:
@@ -134,7 +136,7 @@ def from_openai(body: dict) -> Neutral:
     return Neutral(messages=messages, system="\n\n".join(system_parts) or None,
                    max_tokens=body.get("max_completion_tokens") or body.get("max_tokens"),
                    temperature=temperature, top_p=body.get("top_p"),
-                   stop=[stop] if isinstance(stop, str) else list(stop or []))
+                   stop=[stop] if isinstance(stop, str) else list(stop or []), stream=bool(body.get("stream")))
 
 
 # --- De la forma común al contrato del proveedor
@@ -153,6 +155,8 @@ def to_anthropic(neutral: Neutral, model: str, default_max_tokens: int | None) -
         body["top_p"] = neutral.top_p
     if neutral.stop:
         body["stop_sequences"] = neutral.stop
+    if neutral.stream:
+        body["stream"] = True
     return body
 
 
@@ -167,6 +171,9 @@ def to_openai(neutral: Neutral, model: str) -> dict:
         body["top_p"] = neutral.top_p
     if neutral.stop:
         body["stop"] = neutral.stop
+    if neutral.stream:
+        body["stream"] = True
+        body["stream_options"] = {"include_usage": True}
     return body
 
 
@@ -183,6 +190,18 @@ def usage_from_anthropic(response: dict) -> Usage:
                  cache_write=_int(usage.get("cache_creation_input_tokens")))
 
 
+_ANTHROPIC_USAGE_FIELDS = {"input_tokens": "input", "output_tokens": "output",
+                           "cache_read_input_tokens": "cache_read", "cache_creation_input_tokens": "cache_write"}
+
+
+def merge_anthropic_usage(current: Usage, usage: dict | None) -> None:
+    """En streaming, `message_start` y `message_delta` traen el uso por partes: el último valor gana."""
+    for name, attr in _ANTHROPIC_USAGE_FIELDS.items():
+        value = (usage or {}).get(name)
+        if isinstance(value, int) and value >= 0:
+            setattr(current, attr, value)
+
+
 def usage_from_openai(response: dict) -> Usage:
     usage = response.get("usage") or {}
     cached = _int((usage.get("prompt_tokens_details") or {}).get("cached_tokens"))
@@ -197,8 +216,8 @@ def usage_of(response: dict, contract: Contract) -> Usage:
 
 # --- Respuestas traducidas (solo texto)
 
-_STOP_TO_OPENAI = {"end_turn": "stop", "stop_sequence": "stop", "max_tokens": "length", "refusal": "content_filter"}
-_STOP_TO_ANTHROPIC = {"stop": "end_turn", "length": "max_tokens", "content_filter": "refusal"}
+STOP_TO_OPENAI = {"end_turn": "stop", "stop_sequence": "stop", "max_tokens": "length", "refusal": "content_filter"}
+STOP_TO_ANTHROPIC = {"stop": "end_turn", "length": "max_tokens", "content_filter": "refusal"}
 
 
 def anthropic_to_openai_response(response: dict, *, model: str, request_id: str) -> dict:
@@ -209,7 +228,7 @@ def anthropic_to_openai_response(response: dict, *, model: str, request_id: str)
     return {
         "id": f"chatcmpl-{request_id}", "object": "chat.completion", "created": int(time.time()), "model": model,
         "choices": [{"index": 0, "message": {"role": "assistant", "content": text},
-                     "finish_reason": _STOP_TO_OPENAI.get(response.get("stop_reason"), "stop")}],
+                     "finish_reason": STOP_TO_OPENAI.get(response.get("stop_reason"), "stop")}],
         "usage": {"prompt_tokens": prompt, "completion_tokens": usage.output,
                   "total_tokens": prompt + usage.output,
                   "prompt_tokens_details": {"cached_tokens": usage.cache_read}},
@@ -224,7 +243,7 @@ def openai_to_anthropic_response(response: dict, *, model: str, request_id: str)
     return {
         "id": f"msg_{request_id}", "type": "message", "role": "assistant", "model": model,
         "content": [{"type": "text", "text": text}] if text else [],
-        "stop_reason": _STOP_TO_ANTHROPIC.get(choices[0].get("finish_reason"), "end_turn"),
+        "stop_reason": STOP_TO_ANTHROPIC.get(choices[0].get("finish_reason"), "end_turn"),
         "stop_sequence": None,
         "usage": {"input_tokens": usage.input, "output_tokens": usage.output,
                   "cache_read_input_tokens": usage.cache_read, "cache_creation_input_tokens": 0},

@@ -62,7 +62,10 @@ jobs:
       - name: Comprobar que MySQL y Redis responden desde el gateway
         run: |
           docker compose exec -T gateway python -c "import urllib.request, json; r = json.load(urllib.request.urlopen('http://127.0.0.1:8000/health/ready')); print(r); assert r['status'] == 'ok'"
-      - name: Contrato de inferencia con un proveedor simulado (scripts/prueba_docker.sh)
+      # Los SDK oficiales, para probar el gateway como lo usará PLATIA (messages.stream)
+      - name: Instalar los SDK de Anthropic y OpenAI
+        run: pip install anthropic openai
+      - name: Contrato de inferencia y streaming con un proveedor simulado (scripts/prueba_docker.sh)
         run: bash scripts/prueba_docker.sh
       - name: La prueba se puede repetir
         run: bash scripts/prueba_docker.sh

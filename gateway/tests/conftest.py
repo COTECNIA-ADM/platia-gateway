@@ -65,6 +65,44 @@ def engine():
     eng.dispose()
 
 
+def sse(*events: tuple[str | None, dict | str]) -> bytes:
+    """Cuerpo SSE: (nombre del evento o None, datos)."""
+    out = []
+    for name, data in events:
+        payload = data if isinstance(data, str) else json.dumps(data)
+        out.append((f"event: {name}\n" if name else "") + f"data: {payload}\n\n")
+    return "".join(out).encode()
+
+
+ANTHROPIC_SSE = sse(
+    ("message_start", {"type": "message_start", "message": {
+        "id": "msg_up", "type": "message", "role": "assistant", "model": "claude-upstream", "content": [],
+        "usage": {"input_tokens": 1000, "output_tokens": 1, "cache_read_input_tokens": 2000}}}),
+    ("ping", {"type": "ping"}),
+    ("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+    ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Hola"}}),
+    ("content_block_delta", {"type": "content_block_delta", "index": 0,
+                             "delta": {"type": "text_delta", "text": " mundo"}}),
+    ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+    ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 500}}),
+    ("message_stop", {"type": "message_stop"}),
+)
+
+
+def _openai_chunk(delta: dict, finish=None) -> tuple[None, dict]:
+    return None, {"id": "c1", "object": "chat.completion.chunk", "model": "gpt-upstream",
+                  "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+
+
+OPENAI_SSE = sse(
+    _openai_chunk({"role": "assistant", "content": ""}), _openai_chunk({"content": "Hola"}),
+    _openai_chunk({"content": " mundo"}), _openai_chunk({}, "stop"),
+    (None, {"id": "c1", "object": "chat.completion.chunk", "model": "gpt-upstream", "choices": [],
+            "usage": {"prompt_tokens": 30, "completion_tokens": 7}}),
+    (None, "[DONE]"),
+)
+
+
 class Upstream:
     """Proveedores simulados: guarda lo que recibe y responde lo que se le pide."""
 
@@ -79,9 +117,11 @@ class Upstream:
             raise reply
         if reply is not None:
             return reply
-        if request.url.host == "anthropic.test":
-            return httpx.Response(200, json=ANTHROPIC_REPLY)
-        return httpx.Response(200, json=OPENAI_REPLY)
+        anthropic = request.url.host == "anthropic.test"
+        if json.loads(request.content).get("stream"):
+            return httpx.Response(200, content=ANTHROPIC_SSE if anthropic else OPENAI_SSE,
+                                  headers={"content-type": "text/event-stream"})
+        return httpx.Response(200, json=ANTHROPIC_REPLY if anthropic else OPENAI_REPLY)
 
     def last_json(self) -> dict:
         return json.loads(self.requests[-1].content)

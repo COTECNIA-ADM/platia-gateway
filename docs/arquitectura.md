@@ -96,6 +96,12 @@ traducción están en `contracts.py`, los adaptadores en `providers.py` y las ru
 `api.py`. Los 401 no se registran en `audit_logs` (solo en el log), para que una clave
 falsa no pueda escribir en la base.
 
+**Streaming** (G4, [ADR-008](adr/ADR-008-streaming.md)): con `stream: true`, `execute` abre
+la respuesta del proveedor y comprueba su código. Desde ahí, `streaming.py` reenvía los
+eventos SSE tal cual entre familias iguales, o traducidos si son de familias distintas
+(solo texto). También lee el uso de tokens y cierra la auditoría en el `finally` del
+generador, aunque el cliente se desconecte.
+
 **Etapas del libro que no entran ahora**: ganchos corporativos antes y después del chat
 (con los webhooks de G12), caché exacta y semántica (G11, opcional), contexto RAG (PLATIA
 ya lo tiene), recorte del historial y control previo de ventana (se reconsideran en G7).

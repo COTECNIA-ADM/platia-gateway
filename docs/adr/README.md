@@ -12,3 +12,4 @@ descartaron. Para cambiar una decisión se escribe un ADR nuevo que sustituya al
 | [005](ADR-005-alcance-y-politica-de-fallo.md) | Alcance por bloques y fallar cerrado por defecto | Aceptado |
 | [006](ADR-006-modelo-de-datos.md) | Modelo de datos, claves con hash y secretos cifrados con AES-256-GCM | Aceptado |
 | [007](ADR-007-contrato-y-pipeline-minimo.md) | Contrato y pipeline mínimo: cuerpo sin esquema, traducción solo de texto, auditoría en dos pasos | Aceptado |
+| [008](ADR-008-streaming.md) | Streaming SSE con paso directo de eventos y auditoría al cerrar | Aceptado |

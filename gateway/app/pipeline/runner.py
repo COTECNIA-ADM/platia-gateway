@@ -1,8 +1,9 @@
-"""Orden de las etapas y forma de la respuesta (cap. 3)."""
+"""Orden de las etapas y forma de la respuesta (cap. 3 y 4)."""
 import json
 import re
 import uuid
 
+import anyio
 import structlog
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -11,6 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from ..contracts import check_basics
 from ..errors import GatewayError, InternalError, InvalidRequest, RequestTooLarge, Unavailable, error_response
 from ..models import Contract
+from ..streaming import streaming_response
 from . import audit, auth, execute, policy, route
 from .context import Deps, PipelineContext
 
@@ -47,6 +49,7 @@ def deps_of(request: Request) -> Deps:
 async def run_inference(request: Request, contract: Contract):
     deps = deps_of(request)
     ctx = PipelineContext(request_id=request_id_of(request), contract=contract, headers=request.headers)
+    upstream = None
     try:
         await auth.run(ctx, deps)
         ctx.body = await read_json(request, deps.settings.max_body_bytes)
@@ -55,8 +58,13 @@ async def run_inference(request: Request, contract: Contract):
         await policy.run(ctx, deps)
         await route.run(ctx, deps)
         await audit.open_record(ctx, deps)
-        await execute.run(ctx, deps)
-        await audit.close_success(ctx, deps)
+        if ctx.stream:
+            # A partir de aquí la respuesta (y el cierre de la auditoría) es del generador
+            upstream = await execute.open_upstream_stream(ctx, deps)
+        else:
+            await execute.run(ctx, deps)
+            await audit.close(ctx, deps)
+            ctx.finished = True
     except GatewayError as exc:
         ctx.error = exc
     except SQLAlchemyError:
@@ -66,16 +74,20 @@ async def run_inference(request: Request, contract: Contract):
         log.exception("pipeline.unexpected", request_id=ctx.request_id)
         ctx.error = InternalError("Error interno del gateway")
     finally:
-        if not ctx.finished and ctx.error is None:
-            # Cancelada a mitad (cliente desconectado o apagado): también se registra
-            ctx.error = GatewayError("Petición cancelada", status=499, kind="cancelled")
-        if ctx.error is not None:
-            await audit.close_failure(ctx, deps)
+        if upstream is None and not ctx.finished:
+            if ctx.error is None:
+                # Cancelada a mitad (cliente desconectado o apagado): también se registra
+                ctx.error = GatewayError("Petición cancelada", status=499, kind="cancelled")
+            with anyio.CancelScope(shield=True):
+                await audit.close(ctx, deps)
 
     if ctx.error is not None:
         log.info("request.failed", request_id=ctx.request_id, contract=contract, status=ctx.error.status,
                  error_type=ctx.error.kind, application=ctx.identity.application_slug if ctx.identity else None)
         return error_response(contract, ctx.error, ctx.request_id)
+
+    if upstream is not None:
+        return streaming_response(ctx, deps, upstream)
 
     log.info("request.completed", request_id=ctx.request_id, contract=contract,
              application=ctx.identity.application_slug, purpose=ctx.purpose, model=ctx.model.key,

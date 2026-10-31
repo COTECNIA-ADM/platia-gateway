@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Prueba en Docker del contrato de inferencia (G3), repetible y sin coste.
+# Prueba en Docker del contrato de inferencia (G3) y del streaming (G4), repetible y sin coste.
 #
 # Requisito: la plataforma levantada (docker compose up -d --build --wait).
 # Uso:       bash scripts/prueba_docker.sh
 #
 # Arranca un proveedor simulado en la red edge_net, da de alta con la línea de comandos una
 # organización, una aplicación, una clave, el proveedor y dos modelos (uno de cada familia)
-# y llama al gateway a través de Nginx por los dos contratos. Cada ejecución usa nombres
-# nuevos, así que se puede repetir sin limpiar nada.
+# y llama al gateway a través de Nginx por los dos contratos, con y sin streaming. Si los SDK
+# de Anthropic y OpenAI están instalados (pip install anthropic openai), los prueba también
+# (scripts/prueba_sdk.py). Cada ejecución usa nombres nuevos: se puede repetir sin limpiar.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -75,6 +76,36 @@ out="$(curl -s -w '\n%{http_code}' "$BASE/v1/models" -H "Authorization: Bearer $
 check "Lista de modelos" 200 "$out"
 grep -q "gpt-$RUN" <<<"$out"
 
+echo "== Streaming"
+out="$(curl -sN -w '\n%{http_code}' "$BASE/v1/messages" -H "x-api-key: $KEY" -D /tmp/platia-headers \
+  -d "{\"model\":\"claude-$RUN\",\"max_tokens\":50,\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Hola\"}]}")"
+check "Streaming Anthropic → Anthropic" 200 "$out"
+grep -q "event: message_stop" <<<"$out"
+test "$(grep -c '"text_delta"' <<<"$out")" = "4"
+grep -qi "content-type: text/event-stream" /tmp/platia-headers
+echo "ok: eventos SSE completos (4 trozos de texto y message_stop)"
+
+out="$(curl -sN -w '\n%{http_code}' "$BASE/v1/chat/completions" -H "Authorization: Bearer $KEY" \
+  -d "{\"model\":\"claude-$RUN\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Hola\"}]}")"
+check "Streaming OpenAI → Anthropic (traducido)" 200 "$out"
+grep -q "data: \[DONE\]" <<<"$out"
+
+out="$(curl -sN -w '\n%{http_code}' "$BASE/v1/chat/completions" -H "Authorization: Bearer $KEY" \
+  -d "{\"model\":\"gpt-$RUN\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Hola\"}]}")"
+check "Streaming OpenAI → OpenAI" 200 "$out"
+if grep -q '"usage"' <<<"$out"; then echo "FALLO: se reenvió el uso que el cliente no pidió"; exit 1; fi
+
+PY="${PYTHON:-python3}"
+if "$PY" -c "import anthropic, openai" 2>/dev/null; then
+  echo "== SDK oficiales"
+  "$PY" scripts/prueba_sdk.py "$BASE" "$KEY" "claude-$RUN" "gpt-$RUN"
+  SDK_CALLS=4
+else
+  echo "== SDK oficiales: no instalados (pip install anthropic openai); se omiten"
+  SDK_CALLS=0
+fi
+
+echo "== Errores"
 out="$(curl -s -w '\n%{http_code}' "$BASE/v1/messages" -d '{}')"
 check "Sin clave → 401" 401 "$out"
 out="$(curl -s -w '\n%{http_code}' "$BASE/v1/messages" -H "x-api-key: $KEY" -H 'X-Platia-Purpose: otro' \
@@ -85,7 +116,7 @@ check "La documentación no se publica" 404 "$out"
 
 echo "== Auditoría"
 prefix="$(cut -c1-24 <<<"$KEY")"
-rows="$(docker compose exec -T gateway python - "$prefix" <<'PY'
+summary="$(docker compose exec -T gateway python - "$prefix" <<'PY'
 import asyncio, sys
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -94,16 +125,23 @@ from app.settings import Settings
 async def main():
     engine = create_async_engine(Settings().database_url)
     async with engine.connect() as conn:
-        rows = (await conn.execute(text(
-            "SELECT status, http_status, end_user_ref FROM audit_logs WHERE api_key_prefix = :p ORDER BY id"),
-            {"p": sys.argv[1]})).all()
+        row = (await conn.execute(text(
+            "SELECT SUM(status = 'success'), SUM(status = 'success' AND stream), SUM(status = 'blocked'),"
+            " SUM(status NOT IN ('success', 'blocked')), SUM(end_user_ref = '42'), SUM(output_tokens)"
+            " FROM audit_logs WHERE api_key_prefix = :p"), {"p": sys.argv[1]})).one()
     await engine.dispose()
-    print(";".join(f"{s}/{h}/{u}" for s, h, u in rows))
+    print(" ".join(str(int(v or 0)) for v in row))
 
 asyncio.run(main())
 PY
 )"
-echo "$rows"
-[ "$rows" = "success/200/42;success/200/None;success/200/None;blocked/403/None" ] || { echo "FALLO: auditoría"; exit 1; }
-echo "ok: 4 filas de auditoría (3 correctas y 1 bloqueada); sin texto de la conversación"
+# correctas, de ellas en streaming, bloqueadas, otras, con persona 42, tokens de salida
+read -r ok streamed blocked other person tokens <<<"$summary"
+expected_ok=$((6 + SDK_CALLS))
+echo "correctas=$ok streaming=$streamed bloqueadas=$blocked otras=$other persona42=$person"
+if [ "$ok" != "$expected_ok" ] || [ "$blocked" != 1 ] || [ "$other" != 0 ] || [ "$person" != 1 ] \
+   || [ "$streamed" -lt 3 ] || [ "$tokens" -le 0 ]; then
+  echo "FALLO: auditoría (se esperaban $expected_ok correctas, 1 bloqueada y ninguna pendiente)"; exit 1
+fi
+echo "ok: cada llamada auditada, también las de streaming; sin texto de la conversación"
 echo "== Prueba superada"

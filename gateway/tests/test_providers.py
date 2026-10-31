@@ -116,3 +116,28 @@ def test_sanitize():
     clean = providers.sanitize(text)
     assert clean.count("[REDACTED]") == 4
     assert len(providers.sanitize("una frase normal " * 100)) == 300
+
+
+async def test_streaming_errores_al_abrir():
+    def refused(request):
+        raise httpx.ConnectError("rechazada", request=request)
+
+    async with _client(refused) as client:
+        with pytest.raises(UpstreamFailed):
+            await providers.open_stream(client, ANTHROPIC, {}, {})
+
+    def overloaded(request):
+        return httpx.Response(529, json={"error": {"message": "Overloaded"}})
+
+    async with _client(overloaded) as client:
+        with pytest.raises(Unavailable):
+            await providers.open_stream(client, ANTHROPIC, {}, {})
+
+    class Broken(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            raise httpx.ReadError("cortada")
+            yield b""  # noqa: B901 - generador
+
+    async with _client(lambda request: httpx.Response(500, stream=Broken())) as client:
+        with pytest.raises(UpstreamFailed):
+            await providers.open_stream(client, ANTHROPIC, {}, {})

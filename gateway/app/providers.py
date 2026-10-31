@@ -58,8 +58,8 @@ def _url(target: Target) -> str:
     return f"{base}/chat/completions"
 
 
-def _headers(target: Target, client_headers) -> dict[str, str]:
-    headers = {"content-type": "application/json", "accept": "application/json"}
+def _headers(target: Target, client_headers, *, stream: bool = False) -> dict[str, str]:
+    headers = {"content-type": "application/json", "accept": "text/event-stream" if stream else "application/json"}
     if target.kind == ProviderKind.ANTHROPIC:
         headers["anthropic-version"] = ANTHROPIC_VERSION
         for name in _ANTHROPIC_PASSTHROUGH:
@@ -75,7 +75,7 @@ def _headers(target: Target, client_headers) -> dict[str, str]:
 def _upstream_message(response: httpx.Response) -> str:
     try:
         data = response.json()
-    except ValueError:
+    except (ValueError, httpx.ResponseNotRead):  # cuerpo que no es JSON o que no se pudo leer
         return ""
     error = data.get("error") if isinstance(data, dict) else None
     if isinstance(error, dict) and isinstance(error.get("message"), str):
@@ -101,16 +101,43 @@ def _raise_for(response: httpx.Response, target: Target) -> None:
     raise UpstreamFailed("El proveedor devolvió un error")
 
 
+def _request_failed(exc: httpx.HTTPError, target: Target) -> UpstreamFailed | UpstreamTimeout:
+    if isinstance(exc, httpx.TimeoutException):
+        log.warning("provider.timeout", provider=target.provider_slug, error_type=type(exc).__name__)
+        return UpstreamTimeout("El proveedor no respondió a tiempo")
+    log.warning("provider.unreachable", provider=target.provider_slug, error_type=type(exc).__name__)
+    return UpstreamFailed("No se pudo contactar con el proveedor")
+
+
+async def open_stream(client: httpx.AsyncClient, target: Target, body: dict, client_headers) -> httpx.Response:
+    """Abre la respuesta en streaming y comprueba el código antes de enviar nada al cliente.
+
+    Así un error del proveedor (400, 429, 401...) llega al cliente como un error HTTP normal.
+    Quien recibe la respuesta abierta debe cerrarla (`aclose`).
+    """
+    request = client.build_request("POST", _url(target), json=body, headers=_headers(target, client_headers,
+                                                                                      stream=True))
+    try:
+        response = await client.send(request, stream=True)
+    except httpx.HTTPError as exc:
+        raise _request_failed(exc, target) from exc
+    if response.status_code != 200:
+        try:
+            await response.aread()
+        except httpx.HTTPError:
+            pass
+        finally:
+            await response.aclose()
+        _raise_for(response, target)
+    return response
+
+
 async def send(client: httpx.AsyncClient, target: Target, body: dict, client_headers) -> dict:
     """Envía la petición al proveedor y devuelve su JSON."""
     try:
         response = await client.post(_url(target), json=body, headers=_headers(target, client_headers))
-    except httpx.TimeoutException as exc:
-        log.warning("provider.timeout", provider=target.provider_slug, error_type=type(exc).__name__)
-        raise UpstreamTimeout("El proveedor no respondió a tiempo") from exc
     except httpx.HTTPError as exc:
-        log.warning("provider.unreachable", provider=target.provider_slug, error_type=type(exc).__name__)
-        raise UpstreamFailed("No se pudo contactar con el proveedor") from exc
+        raise _request_failed(exc, target) from exc
     if response.status_code != 200:
         _raise_for(response, target)
     try:

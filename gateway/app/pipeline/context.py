@@ -63,6 +63,8 @@ class PipelineContext:
     # route
     target: Target | None = None
     upstream_body: dict | None = None
+    # El gateway pidió el uso al proveedor (OpenAI) sin que el cliente lo pidiera: no se le reenvía
+    hide_usage_chunk: bool = False
     # execute
     response_body: dict | None = None
     usage: Usage = field(default_factory=Usage)

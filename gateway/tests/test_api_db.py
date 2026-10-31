@@ -197,12 +197,6 @@ def test_modelo_desconocido_o_no_permitido(client, world, engine):
     assert [r.status for r in _audit(engine)] == ["error", "blocked"]
 
 
-def test_streaming_aun_no(client, world, upstream):
-    response = client.post("/v1/messages", json=_anthropic_body(stream=True), headers={"x-api-key": world.keys["platia"]})
-    assert response.status_code == 400 and "streaming" in response.json()["error"]["message"]
-    assert upstream.requests == []
-
-
 @pytest.mark.parametrize("content, status", [
     (b"no es json", 400), (b"[1, 2]", 400), (b'{"messages": []}', 400), (b"{" + b" " * 11_000_000 + b"}", 413)])
 def test_cuerpos_no_validos(client, world, content, status):
