@@ -89,6 +89,13 @@ Atajos: una etapa puede cortar el pipeline (identidad inválida, bloqueo de segu
 agotada). La auditoría se ejecuta siempre, también en los cortes y cuando el cliente se
 desconecta a mitad de un streaming (bloque `finally`).
 
+**En el código** (G3, [ADR-007](adr/ADR-007-contrato-y-pipeline-minimo.md)): cada etapa es
+un módulo de `gateway/app/pipeline/` y `runner.py` fija el orden: `auth` → `policy` →
+`route` → apertura de `audit` → `execute` → cierre de `audit`. Los contratos y su
+traducción están en `contracts.py`, los adaptadores en `providers.py` y las rutas en
+`api.py`. Los 401 no se registran en `audit_logs` (solo en el log), para que una clave
+falsa no pueda escribir en la base.
+
 **Etapas del libro que no entran ahora**: ganchos corporativos antes y después del chat
 (con los webhooks de G12), caché exacta y semántica (G11, opcional), contexto RAG (PLATIA
 ya lo tiene), recorte del historial y control previo de ventana (se reconsideran en G7).

@@ -21,6 +21,10 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
   upgrade/downgrade/upgrade
 - Tests con base de datos: `TEST_DATABASE_URL=mysql+pymysql://usuario:clave@host:puerto/base pytest`
   (vacía y recrea la base: nunca una con datos)
+- Alta de configuración (hasta el panel, G13): `docker compose run --rm migrations python -m app.cli <orden>`
+  (`create-org`, `create-app`, `create-key`, `create-provider`, `create-model`, `create-deployment`,
+  `set-price`, `revoke-key`, `show`)
+- Prueba en Docker sin coste (con la plataforma levantada): `bash scripts/prueba_docker.sh`
 - Estilo: `ruff check gateway` (configuración en `ruff.toml`); la CI exige además una
   cobertura mínima (`--cov-fail-under`, ver `.github/workflows/ci.yml`)
 
@@ -36,6 +40,11 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
 - Secretos de proveedor siempre cifrados con `app/crypto.py`; claves de cliente solo como hash.
 - Fallar cerrado: si no se puede resolver la identidad, la cuota o una política, se
   rechaza la petición.
+- Pipeline (ADR-003, ADR-007): una etapa por módulo en `app/pipeline/`, con firma
+  `run(ctx, deps)`; corta lanzando un error de `app/errors.py` y nunca llama a otra etapa.
+  El orden está en `runner.py`. Entre familias iguales el cuerpo se reenvía tal cual; la
+  traducción entre familias está en `contracts.py` y nunca degrada sin avisar.
+- Las cabeceras propias (`X-Platia-*`) y la clave del cliente nunca se reenvían al proveedor.
 - Cada fase llega en un PR con tests, `ruff` y cobertura en verde, y una prueba en Docker
   que se pueda repetir.
 - No exponer MySQL ni Redis fuera de `data_net`. Nginx solo publica las rutas que tocan.

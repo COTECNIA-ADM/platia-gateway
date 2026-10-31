@@ -7,8 +7,8 @@ Uso: python scripts/generate_env.py [--force | --actualizar]
   <GENERAR_FERNET> por una clave Fernet válida.
 - --actualizar añade a un .env existente las variables nuevas de .env.example
   (por ejemplo, al pasar de fase) sin tocar las que ya tienes.
-- Deja vacías las claves de proveedores externos (a partir de G3,
-  ANTHROPIC_API_KEY...): esas las pones tú a mano en .env.
+- Las claves de los proveedores (Anthropic...) no van en .env: se guardan
+  cifradas en la base con `python -m app.cli create-provider` (ver README).
 - No sobrescribe un .env existente salvo con --force (perderías los secretos
   con los que se creó la base de datos).
 """

@@ -1,0 +1,4 @@
+# SQLAlchemy asíncrono ejecuta el código entre awaits dentro de greenlets: sin esto,
+# coverage no ve esas líneas
+[run]
+concurrency = thread,greenlet

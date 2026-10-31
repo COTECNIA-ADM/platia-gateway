@@ -17,12 +17,56 @@ curl http://localhost:8090/health       # {"status":"ok","service":"platia-gatew
 
 El puerto se cambia con `HTTP_PORT` en `.env` (PLATIA usa el 8080).
 
+## Primera llamada a Claude
+
+Hasta que llegue el panel de administración (G13), la configuración se da de alta con la
+línea de comandos. La clave de Anthropic no va en `.env`: se guarda cifrada en la base.
+
+```bash
+cli() { docker compose run --rm migrations python -m app.cli "$@"; }
+cli create-org --slug cotecnia --name Cotecnia
+cli create-team --org cotecnia --slug plataforma --name Plataforma
+cli create-app --org cotecnia --team plataforma --slug platia --name PLATIA --trusted
+docker compose run --rm -e ANTHROPIC_API_KEY migrations python -m app.cli create-provider \
+    --slug anthropic --name Anthropic --kind anthropic --api-key-env ANTHROPIC_API_KEY
+cli create-model --key claude-sonnet-5-5 --name "Claude Sonnet 5.5" --family anthropic
+cli create-deployment --model claude-sonnet-5-5 --provider anthropic
+cli set-price --model claude-sonnet-5-5 --input 3 --output 15 --cache-read 0.3 --cache-write 3.75
+cli create-key --org cotecnia --app platia     # muestra la clave plgw-app-... una sola vez
+```
+
+(Para `create-provider`, exporta antes `ANTHROPIC_API_KEY` en tu terminal; comprueba los
+precios vigentes en la web de Anthropic.) Después, con el SDK de Anthropic o con `curl`:
+
+```bash
+curl http://localhost:8090/v1/messages -H "x-api-key: plgw-app-platia-..." \
+    -H "anthropic-version: 2023-06-01" -H "content-type: application/json" \
+    -d '{"model":"claude-sonnet-5-5","max_tokens":200,"messages":[{"role":"user","content":"Hola"}]}'
+```
+
+La respuesta trae las cabeceras `X-Platia-Model-Used`, `X-Platia-Cost-Usd` y
+`X-Platia-Latency-Ms`, y cada llamada queda en la tabla `audit_logs` (sin el texto).
+`cli show` resume lo dado de alta y `cli revoke-key --prefix ...` revoca una clave.
+
+Las mismas rutas aceptan el contrato de OpenAI (`POST /v1/chat/completions`, clave en
+`Authorization: Bearer`). Por ahora sin streaming: llega en G4.
+
+## Prueba en Docker sin coste
+
+```bash
+bash scripts/prueba_docker.sh
+```
+
+Arranca un proveedor simulado, da de alta una configuración nueva y comprueba los dos
+contratos, los errores de identidad y permisos, las cabeceras y la auditoría. Se puede
+repetir: cada ejecución usa nombres nuevos.
+
 ## Desarrollo
 
 ```bash
 cd gateway
 pip install -r requirements-dev.txt
-pytest
+pytest                                  # los tests con MySQL necesitan TEST_DATABASE_URL
 ruff check .
 ```
 
