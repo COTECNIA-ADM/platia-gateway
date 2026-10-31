@@ -16,6 +16,11 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
 - Crear `.env`: `python scripts/generate_env.py` (variables nuevas: `--actualizar`)
 - Levantar: `docker compose up -d --build --wait` → http://localhost:8090/health
 - Tests: `cd gateway && pip install -r requirements-dev.txt && pytest`
+- Migraciones: las aplica el contenedor `migrations` al levantar. Nueva migración:
+  `cd gateway && alembic revision --autogenerate -m "..."`, revisarla a mano y probar
+  upgrade/downgrade/upgrade
+- Tests con base de datos: `TEST_DATABASE_URL=mysql+pymysql://usuario:clave@host:puerto/base pytest`
+  (vacía y recrea la base: nunca una con datos)
 - Estilo: `ruff check gateway` (configuración en `ruff.toml`); la CI exige además una
   cobertura mínima (`--cov-fail-under`, ver `.github/workflows/ci.yml`)
 
@@ -25,6 +30,10 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
 - Toda configuración y secreto sale de variables de entorno (`app/settings.py`); plantilla
   en `.env.example`. Una variable nueva va en los dos sitios y en `docker-compose.yml`.
 - Los errores nunca devuelven detalles internos: el detalle va al log.
+- Cada modelo nuevo se importa en `app/models/__init__.py`. Fechas por defecto con
+  `default=utcnow`; configuración con borrado lógico (`deleted_at`); la auditoría guarda ids
+  como enteros, sin claves foráneas, y nunca texto de prompts ni respuestas.
+- Secretos de proveedor siempre cifrados con `app/crypto.py`; claves de cliente solo como hash.
 - Fallar cerrado: si no se puede resolver la identidad, la cuota o una política, se
   rechaza la petición.
 - Cada fase llega en un PR con tests, `ruff` y cobertura en verde, y una prueba en Docker
@@ -42,4 +51,4 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
 ## Lo que NO hacer
 - No hardcodear API keys, contraseñas ni secretos. No subir `.env`.
 - No hacer commit sin que pasen los tests.
-- No hacer `ALTER TABLE` a mano: los cambios de esquema irán con Alembic (desde G2).
+- No hacer `ALTER TABLE` a mano: los cambios de esquema van con Alembic.

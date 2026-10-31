@@ -1,4 +1,4 @@
-# PLATIA Gateway: 4 contenedores en 2 redes (fase G0).
+# PLATIA Gateway: 4 contenedores en 2 redes, más la tarea de migraciones.
 #
 # Arranque:  python scripts/generate_env.py && docker compose up -d --build
 # Salud:     http://localhost:8090/health  (o el puerto de HTTP_PORT)
@@ -42,9 +42,11 @@ services:
     restart: unless-stopped
     networks: [data_net]
 
-  gateway:
+  # Aplica las migraciones de Alembic y termina; el gateway espera a que acabe bien
+  migrations:
     build: ./gateway
-    environment:
+    command: ["alembic", "upgrade", "head"]
+    environment: &gateway-env
       GATEWAY_ENV: ${GATEWAY_ENV:-development}
       DB_HOST: mysql
       DB_PORT: "3306"
@@ -60,11 +62,23 @@ services:
       HEALTH_TIMEOUT_SECONDS: ${HEALTH_TIMEOUT_SECONDS:-2}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: ${LOG_FORMAT:-json}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
+    networks: [data_net]
+
+  gateway:
+    build: ./gateway
+    environment: *gateway-env
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"]
       interval: 15s

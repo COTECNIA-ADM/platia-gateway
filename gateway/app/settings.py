@@ -40,6 +40,9 @@ class Settings:
     redis_password: str = field(default_factory=lambda: _env("REDIS_PASSWORD"))
     redis_db: int = field(default_factory=lambda: _int("REDIS_DB", "0"))
 
+    # --- Cifrado en reposo de secretos de proveedor (AES-256-GCM): 32 bytes en base64 url-safe
+    encryption_key: str = field(default_factory=lambda: _env("ENCRYPTION_KEY"))
+
     # --- Comprobaciones de salud: tiempo máximo por dependencia
     health_timeout_seconds: float = field(default_factory=lambda: _float("HEALTH_TIMEOUT_SECONDS", "2"))
 
