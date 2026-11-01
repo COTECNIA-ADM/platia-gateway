@@ -3,7 +3,7 @@ import { useState, type FormEvent } from 'react'
 import { useAuth } from '../lib/auth'
 import { ErrorBox, Field } from '../components/ui'
 
-export function Login() {
+export function Login({ title = 'Panel de administración' }: { title?: string }) {
   const { status, login, completeMfa } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -28,7 +28,7 @@ export function Login() {
     <main className="login">
       <section className="card login-card">
         <h1>PLATIA Gateway</h1>
-        <p className="muted">Panel de administración</p>
+        <p className="muted">{title}</p>
         {error !== null && <ErrorBox error={error} />}
         {status === 'mfa' ? (
           <form onSubmit={(e) => submit(e, () => completeMfa(code.trim()))}>

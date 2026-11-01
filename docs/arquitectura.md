@@ -50,10 +50,11 @@ flowchart LR
 | `POST /v1/chat/completions` | OpenAI Chat Completions | Clientes compatibles con OpenAI | G3 (G4 streaming) |
 | `GET /v1/models` | OpenAI | Saber qué modelos puede usar una clave | G3 |
 | `GET /health` | Propio | Nginx y monitorización | G0 |
-| `/auth/*` y `/me/*` | Propio (JSON) | Personas: sesión, MFA y claves personales; el panel y el portal | G10 |
+| `/auth/*` y `/me/*` | Propio (JSON) | Personas: sesión, MFA, claves personales y portal (consumo propio, rotación) | G10, G14 |
 | `/events/stream` | WebSocket | Eventos en tiempo real para el panel | G12 |
 | `/admin/*` | Propio (JSON) | Panel de administración (ver `docs/panel.md`) | G13 |
 | `/panel/` | Web (estáticos de Nginx) | La aplicación del panel, del mismo origen que la API | G13 |
+| `/portal/` | Web (estáticos de Nginx) | El portal de cada persona, mismo build que el panel | G14 |
 
 Los dos contratos convergen en el mismo pipeline: la diferencia está solo en cómo se lee la
 entrada y cómo se da forma a la salida. Cuando la petición y el proveedor son de la misma
