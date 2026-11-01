@@ -1,0 +1,60 @@
+# Publica las imágenes de producción en el registro de GitHub (G15, ADR-019).
+# Se ejecuta en cada cambio de main cuando la CI ha pasado. Cada imagen lleva dos etiquetas:
+# el commit (sha-xxxxxxx), que es la que se despliega, y latest.
+# Adaptado de cotecnia-adm/platia-dev (.github/workflows/release.yml).
+name: Imágenes
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: gateway
+            context: gateway
+            file: gateway/Dockerfile
+          # Nginx con el panel y el portal compilados: se construye desde la raíz
+          - image: nginx
+            context: .
+            file: nginx/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Nombre y etiquetas
+        id: meta
+        run: |
+          sha="${{ github.event.workflow_run.head_sha || github.sha }}"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}/${{ matrix.image }}"
+          echo "tags=${image}:sha-${sha::7},${image}:latest" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

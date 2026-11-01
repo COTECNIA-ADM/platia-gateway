@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 
 from app import audit_chain, cli
-from app.main import seal_forever
+from app.background import seal_forever
 from app.models import AuditChainState, AuditLog, Organization
 from app.models.base import utcnow
 
@@ -224,7 +224,7 @@ def test_el_gateway_sella_en_segundo_plano(client, world, engine, settings):
 
 def test_un_fallo_al_sellar_no_para_el_gateway(client, settings, monkeypatch):
     events = []
-    monkeypatch.setattr("app.main.log", type("L", (), {"error": lambda self, e, **k: events.append(e)})())
+    monkeypatch.setattr("app.background.log", type("L", (), {"error": lambda self, e, **k: events.append(e)})())
 
     def broken():
         raise OSError("sin base")

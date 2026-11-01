@@ -1,4 +1,5 @@
 import asyncio
+import base64
 
 from fastapi.testclient import TestClient
 
@@ -64,8 +65,13 @@ def test_ready_con_dependencias_reales_inalcanzables():
     assert response.json()["checks"] == {"mysql": "error", "redis": "error"}
 
 
+# Configuración de producción que pasa las comprobaciones de arranque (G15)
+PROD = dict(env="production", encryption_key=base64.urlsafe_b64encode(b"k" * 32).decode(), jwt_secret="j" * 40, db_password="p" * 20,
+            redis_password="r" * 20, background_tasks=False, audit_seal_interval_seconds=0, webhook_poll_seconds=0)
+
+
 def test_documentacion_oculta_en_produccion():
-    with _client({}, env="production") as client:
+    with _client({}, **PROD) as client:
         assert client.get("/openapi.json").status_code == 404
         assert client.get("/docs").status_code == 404
     with _client({}, env="development") as client:

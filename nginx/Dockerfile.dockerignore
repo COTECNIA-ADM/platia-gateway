@@ -1,6 +1,9 @@
 # Solo hace falta el panel y la configuración de Nginx
 *
 !nginx/nginx.conf
+!nginx/prod.conf.template
+!nginx/reload-certs.sh
+!nginx/snippets/
 !panel/
 panel/node_modules
 panel/dist

@@ -10,7 +10,9 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
 - **Gateway**: FastAPI asíncrono + SQLAlchemy 2 (aiomysql) — `gateway/`
 - **Datos**: MySQL 8.0 (base `platia_gateway`) y Redis 7
 - **Panel y portal**: React 18 + TypeScript + Vite — `panel/` (portal en `src/portal/`), compilado en la imagen de Nginx y servido en `/panel/` y `/portal/`
-- **Proxy**: Nginx, único servicio con puerto publicado (8090) — `nginx/nginx.conf` y `nginx/Dockerfile`
+- **Tareas de fondo**: servicio `worker` (`python -m app.worker`): sellado y webhooks; la API va con `BACKGROUND_TASKS=false`
+- **Proxy**: Nginx, único servicio con puerto publicado (8090; en producción, HTTPS en el 8443) —
+  `nginx/nginx.conf` (desarrollo), `nginx/prod.conf.template` (producción), `nginx/snippets/` (comunes) y `nginx/Dockerfile`
 - **Redes Docker**: `edge_net` (Nginx ↔ gateway) y `data_net` (gateway ↔ MySQL/Redis)
 
 ## Comandos
@@ -36,6 +38,9 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
   (con `pip install anthropic openai`, prueba también los SDK oficiales)
 - Conexión con PLATIA (G5): alta con `bash scripts/alta_platia.sh`; prueba conjunta con
   `PLATIA_DIR=../platia-dev bash scripts/prueba_platia.sh`; guía en `docs/conexion-platia.md`
+- Producción (guía en `docs/despliegue.md`): `docker compose -f docker-compose.yml -f docker-compose.prod.yml ...`;
+  desplegar con `scripts/deploy.sh sha-xxxxxxx`, copias con `scripts/backup.sh --prod` y `scripts/restore.sh`;
+  prueba local de la configuración de producción: `bash scripts/prueba_produccion.sh`
 - Panel: `cd panel && npm ci && npm test && npm run build` (desarrollo: `npm run dev`, con el gateway levantado)
 - Estilo: `ruff check gateway` (configuración en `ruff.toml`); la CI exige además una
   cobertura mínima (`--cov-fail-under`, ver `.github/workflows/ci.yml`)
@@ -101,6 +106,11 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
   comprueba las reglas que se pueden leer en el código.
 - Cada fase llega en un PR con tests, `ruff` y cobertura en verde, y una prueba en Docker
   que se pueda repetir.
+- Despliegue (ADR-019): una tarea de fondo nueva va en `app/background.py` (la arranca el
+  worker) y debe ser segura con varios procesos. Una comprobación de producción nueva va en
+  `Settings.production_problems` (nombra la variable, nunca su valor). Una ruta nueva se publica
+  en `nginx/snippets/locations.conf` con su zona de límite. Las migraciones, compatibles hacia
+  atrás (primero se añade, lo que sobra se borra después), para que `deploy.sh` pueda volver atrás.
 - No exponer MySQL ni Redis fuera de `data_net`. Nginx solo publica las rutas que tocan.
 
 ## Licencia y libro

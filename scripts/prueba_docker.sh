@@ -2,7 +2,9 @@
 # Prueba en Docker del contrato de inferencia (G3), del streaming (G4), de la reserva (G6),
 # de las cuotas (G7), de la seguridad de contenido (G8), de la auditoría (G9), de la
 # identidad de personas (G10), de la caché (G11), de la telemetría (G12), de la API del panel
-# (G13) y del portal de usuario (G14), repetible y sin coste.
+# (G13), del portal de usuario (G14) y de la operación (G15: proceso de tareas de fondo,
+# límites y registro de Nginx), repetible y sin coste. La configuración de producción (HTTPS)
+# se prueba aparte con scripts/prueba_produccion.sh.
 #
 # Requisito: la plataforma levantada (docker compose up -d --build --wait).
 # Uso:       bash scripts/prueba_docker.sh
@@ -538,5 +540,34 @@ portal="$(curl -s -D - "$BASE/portal/keys")"
 grep -q "^HTTP/1.1 200" <<<"$portal" && grep -qi "content-security-policy: default-src 'none'; script-src 'self'" <<<"$portal" \
   && grep -q '/panel/assets/portal-' <<<"$portal" || { echo "FALLO: Nginx no sirve el portal con su política de contenido"; exit 1; }
 echo "ok: Nginx sirve el portal en /portal/ con la misma política de contenido que el panel"
+
+echo "== Operación (G15): tareas de fondo aparte y Nginx endurecido"
+[ "$(docker compose exec -T gateway printenv BACKGROUND_TASKS)" = false ] \
+  || { echo "FALLO: la API no debía correr las tareas de fondo"; exit 1; }
+docker compose exec -T worker python -m app.worker --check \
+  || { echo "FALLO: el proceso de tareas de fondo no late"; exit 1; }
+echo "ok: el sellado y los webhooks los hace el worker (sus pruebas de arriba han pasado) y la API no"
+curl -s -o /dev/null "$BASE/me/requests?persona=secreta-$RUN" -H "X-Request-ID: log-$RUN"
+sleep 1
+line="$(docker compose logs --no-log-prefix --since 2m nginx 2>/dev/null | grep "\"request_id\":\"log-$RUN\"" | tail -n 1)"
+echo "registro: $line"
+grep -q '"path":"/me/requests"' <<<"$line" && ! grep -q "secreta-$RUN" <<<"$line" \
+  && grep -Eq '"ip":"[0-9]+\.[0-9]+\.[0-9]+\.0"' <<<"$line" \
+  || { echo "FALLO: el registro de Nginx debía ir en JSON, sin la consulta y con la dirección recortada"; exit 1; }
+echo "ok: registro de accesos en JSON, sin la consulta ni el último octeto de la dirección"
+out="$(curl -s -w '\n%{http_code}' "$BASE/docs")"
+check "Lo no publicado (documentación) → 404" 404 "$out"
+limited=0
+for _ in $(seq 1 40); do
+  out="$(curl -s -w '\n%{http_code}' "$BASE/auth/login" -H 'content-type: application/json' \
+    -d "{\"email\":\"nadie-$RUN@prueba.test\",\"password\":\"x\"}")"
+  if [ "${out##*$'\n'}" = 429 ]; then limited=1; break; fi
+done
+[ "$limited" = 1 ] && grep -q '"rate_limit_error"' <<<"$out" \
+  || { echo "FALLO: Nginx debía limitar los inicios de sesión seguidos desde una dirección"; exit 1; }
+echo "ok: demasiados inicios de sesión desde una dirección → 429 en JSON"
+# Reiniciar Nginx vacía los contadores: la prueba se puede repetir enseguida
+docker compose restart nginx >/dev/null 2>&1
+for _ in $(seq 1 20); do curl -sf -o /dev/null "$BASE/health" && break; sleep 0.5; done
 
 echo "== Prueba superada"

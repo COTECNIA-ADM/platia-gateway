@@ -11,11 +11,13 @@ Se construye por fases; el plan está en [`docs/plan-fases.md`](docs/plan-fases.
 
 ```bash
 python scripts/generate_env.py          # crea .env con secretos aleatorios
-docker compose up -d --build --wait     # gateway, MySQL, Redis y Nginx
+docker compose up -d --build --wait     # gateway, worker, MySQL, Redis y Nginx
 curl http://localhost:8090/health       # {"status":"ok","service":"platia-gateway",...}
 ```
 
-El puerto se cambia con `HTTP_PORT` en `.env` (PLATIA usa el 8080).
+El puerto se cambia con `HTTP_PORT` en `.env` (PLATIA usa el 8080). Producción (en el
+servidor de PLATIA, solo HTTPS en el 8443, con despliegue, vuelta atrás y copias): guía en
+[docs/despliegue.md](docs/despliegue.md) y decisiones en [ADR-019](docs/adr/ADR-019-despliegue-y-operacion.md).
 
 ## Primera llamada a Claude
 
@@ -207,6 +209,10 @@ Arranca un proveedor simulado, da de alta una configuración nueva y comprueba l
 contratos con y sin streaming, los errores de identidad y permisos, las cabeceras y la
 auditoría. Si tienes instalados los SDK (`pip install anthropic openai`), los prueba también
 como los usará PLATIA. Se puede repetir: cada ejecución usa nombres nuevos.
+
+`bash scripts/prueba_produccion.sh` prueba la configuración de producción (HTTPS con un
+certificado autofirmado, arranque seguro, copia y restauración) y deja la plataforma en
+desarrollo.
 
 `PLATIA_DIR=../platia-dev bash scripts/prueba_platia.sh` prueba además la conexión con el
 `ai_service` real de PLATIA, por el gateway y con el interruptor apagado.
