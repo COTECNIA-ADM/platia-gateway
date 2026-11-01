@@ -9,7 +9,8 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
 ## Stack
 - **Gateway**: FastAPI asíncrono + SQLAlchemy 2 (aiomysql) — `gateway/`
 - **Datos**: MySQL 8.0 (base `platia_gateway`) y Redis 7
-- **Proxy**: Nginx, único servicio con puerto publicado (8090) — `nginx/nginx.conf`
+- **Panel**: React 18 + TypeScript + Vite — `panel/`, compilado en la imagen de Nginx y servido en `/panel/`
+- **Proxy**: Nginx, único servicio con puerto publicado (8090) — `nginx/nginx.conf` y `nginx/Dockerfile`
 - **Redes Docker**: `edge_net` (Nginx ↔ gateway) y `data_net` (gateway ↔ MySQL/Redis)
 
 ## Comandos
@@ -35,6 +36,7 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
   (con `pip install anthropic openai`, prueba también los SDK oficiales)
 - Conexión con PLATIA (G5): alta con `bash scripts/alta_platia.sh`; prueba conjunta con
   `PLATIA_DIR=../platia-dev bash scripts/prueba_platia.sh`; guía en `docs/conexion-platia.md`
+- Panel: `cd panel && npm ci && npm test && npm run build` (desarrollo: `npm run dev`, con el gateway levantado)
 - Estilo: `ruff check gateway` (configuración en `ruff.toml`); la CI exige además una
   cobertura mínima (`--cov-fail-under`, ver `.github/workflows/ci.yml`)
 
@@ -89,6 +91,11 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
   que se da con la CLI. Cada cambio llama a `record(...)` antes de `commit` (misma
   transacción) y los secretos se registran como `(cambiado)`. Un secreto se enseña una vez,
   con `no-store`. Una ruta nueva va también en `docs/panel.md`.
+- Panel web (`panel/`): llamadas solo con `src/lib/api.ts`, datos con React Query, token en
+  memoria (nunca `localStorage` ni `sessionStorage`), nada de `dangerouslySetInnerHTML`,
+  gráficos con vista de tabla, filtros en la URL y textos en español. Pruebas `*.test.tsx`
+  junto a la pantalla con `mockApi` y `renderWithProviders`; `src/test/conventions.test.ts`
+  comprueba las reglas que se pueden leer en el código.
 - Cada fase llega en un PR con tests, `ruff` y cobertura en verde, y una prueba en Docker
   que se pueda repetir.
 - No exponer MySQL ni Redis fuera de `data_net`. Nginx solo publica las rutas que tocan.

@@ -108,7 +108,8 @@ async def _principal(request: Request, *, allow_setup: bool = False) -> identity
 
 def _user_body(who: identity.Principal) -> dict:
     return {"id": who.user_id, "email": who.email, "name": who.name, "role": str(who.role),
-            "organization_id": who.organization_id, "mfa_enabled": who.mfa_enabled, "scope": who.scope}
+            "organization_id": who.organization_id, "mfa_enabled": who.mfa_enabled, "scope": who.scope,
+            "platform_operator": who.platform_operator}
 
 
 # --- /auth

@@ -1,0 +1,6 @@
+# Solo hace falta el panel y la configuración de Nginx
+*
+!nginx/nginx.conf
+!panel/
+panel/node_modules
+panel/dist

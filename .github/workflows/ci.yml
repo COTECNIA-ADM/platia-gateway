@@ -46,6 +46,23 @@ jobs:
       # Cobertura medida en cada PR; falla si baja del mínimo
       - run: pytest -q --cov=app --cov-report=term-missing:skip-covered --cov-fail-under=85
 
+  panel:
+    # Panel de administración (G13b): tipos, pruebas de pantallas y compilación
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: panel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: panel/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - run: npm run build
+
   compose:
     # Levanta los 4 contenedores con un .env generado, comprueba que responden y prueba el contrato
     runs-on: ubuntu-latest
