@@ -20,7 +20,7 @@ log = structlog.get_logger(__name__)
 
 DEFAULT_BASE_URLS = {ProviderKind.ANTHROPIC: "https://api.anthropic.com"}
 # Cabeceras del cliente que Anthropic necesita ver (versión de la API y funciones beta)
-_ANTHROPIC_PASSTHROUGH = ("anthropic-version", "anthropic-beta")
+PASSTHROUGH_HEADERS = ("anthropic-version", "anthropic-beta")
 
 
 @dataclass(frozen=True)
@@ -62,7 +62,7 @@ def _headers(target: Target, client_headers, *, stream: bool = False) -> dict[st
     headers = {"content-type": "application/json", "accept": "text/event-stream" if stream else "application/json"}
     if target.kind == ProviderKind.ANTHROPIC:
         headers["anthropic-version"] = ANTHROPIC_VERSION
-        for name in _ANTHROPIC_PASSTHROUGH:
+        for name in PASSTHROUGH_HEADERS:
             if client_headers.get(name):
                 headers[name] = client_headers[name]
         if target.api_key:

@@ -16,8 +16,8 @@ Alcance acordado: bloques A y B (G0–G9, hechos) y después el bloque C (G10–
 | G7 | Cuotas, coste y rate limiting | Precios, coste por llamada, cuotas por organización, equipo, aplicación y persona; límites por minuto y de simultáneas (ventanas fijas, ADR-011) | 13–15 | Hecha |
 | G8 | Seguridad de contenido | Jailbreak, PII, DLP, firewall y filtro de salida también en streaming | 19–20 | Hecha |
 | G9 | Auditoría y gobierno | Registro append-only con cadena SHA-256, sellado y conciliación, exportación y seudonimización RGPD (ADR-013) | 21–22 | Hecha |
-| G10 | Identidad de personas | Contraseña y TOTP, sesiones revocables con renovación rotada, claves personales (ADR-014); SSO/OIDC cuando se elija proveedor | 16–18 | En curso |
-| G11 | Eficiencia (opcional) | Caché exacta por organización y compresión ligera | 8–9 | Más adelante |
+| G10 | Identidad de personas | Contraseña y TOTP, sesiones revocables con renovación rotada, claves personales (ADR-014); SSO/OIDC cuando se elija proveedor | 16–18 | Hecha |
+| G11 | Eficiencia (opcional) | Caché exacta por aplicación y persona, cifrada y opcional (ADR-015); sin compresión de prompts | 8–9 | En curso |
 | G12 | Telemetría | Métricas, logs, tiempo real por WebSocket y webhooks firmados | 24 | Más adelante |
 | G13 | Panel de administración | App React: operaciones, proveedores y routing, cuotas, firewall, auditoría | 27–29 | Más adelante |
 | G14 | Portal de usuario | Cuenta, seguridad, claves y consumo propios | 30–31 | Más adelante |

@@ -5,7 +5,8 @@ Uso dentro de Docker (el contenedor de migraciones tiene acceso a MySQL):
     docker compose run --rm migrations python -m app.cli <orden> [opciones]
 
 Órdenes: create-org, create-team, create-app, create-key, revoke-key, create-user, set-user,
-set-password, reset-mfa y revoke-sessions (personas, G10), create-provider,
+set-password, reset-mfa y revoke-sessions (personas, G10), set-cache y cache-clear (caché
+exacta, G11), create-provider,
 create-model, set-fallbacks (cadena de reserva), create-deployment, set-deployment
 (prioridad, peso o estado), set-price, set-limit, remove-limit y limits (cuotas y límites de
 ritmo, G7), set-content-policy y content-policies (seguridad de contenido, G8),
@@ -36,6 +37,7 @@ from sqlalchemy.orm import Session
 from .crypto import encrypt, load_key
 from .keys import new_application_key, new_user_key
 from . import passwords
+from .pipeline import cache
 from . import audit_chain
 from .content_policy import ALLOWED, DEFAULTS
 from .limits import window
@@ -49,6 +51,9 @@ from .settings import Settings
 
 class CliError(Exception):
     pass
+
+
+MAX_CACHE_TTL = 30 * 86400
 
 
 def _out(text: str) -> None:
@@ -220,6 +225,39 @@ def set_user(db: Session, args, settings: Settings) -> None:
         if not user.is_active:
             _close_sessions(db, user, "admin")
     _out(f"{user.email}: rol {user.role}, {'activa' if user.is_active else 'inactiva'}")
+
+
+def set_cache(db: Session, args, settings: Settings) -> None:
+    """Caché exacta de una aplicación (G11): cuánto se guarda cada respuesta y para qué propósitos."""
+    org = _org(db, args.org)
+    app = _one(db, Application, organization_id=org.id, slug=args.app, deleted_at=None)
+    if not 0 <= args.ttl <= MAX_CACHE_TTL:
+        raise CliError(f"La duración debe estar entre 0 (sin caché) y {MAX_CACHE_TTL} segundos")
+    app.cache_ttl_seconds = args.ttl
+    app.cache_purposes = args.purpose or None
+    if args.ttl == 0:
+        _out(f"'{app.slug}': sin caché")
+        return
+    which = ", ".join(app.cache_purposes) if app.cache_purposes else "todos los propósitos"
+    _out(f"'{app.slug}': caché de {args.ttl} s para {which}")
+    if not settings.encryption_key:
+        _out("Aviso: sin ENCRYPTION_KEY el gateway no guarda respuestas")
+
+
+def cache_clear(db: Session, args, settings: Settings) -> None:
+    """Borra las respuestas guardadas (por ejemplo, tras cambiar un prompt o un modelo)."""
+    from redis import Redis
+
+    org = _org(db, args.org)
+    app = _one(db, Application, organization_id=org.id, slug=args.app, deleted_at=None) if args.app else None
+    redis = Redis(host=settings.redis_host, port=settings.redis_port, db=settings.redis_db,
+                  password=settings.redis_password or None, socket_timeout=5)
+    try:
+        keys = list(redis.scan_iter(match=cache.pattern(org.id, app.id if app else None), count=500))
+        deleted = sum(redis.delete(*keys[i:i + 500]) for i in range(0, len(keys), 500))
+    finally:
+        redis.close()
+    _out(f"Respuestas borradas de la caché: {deleted}")
 
 
 def create_provider(db: Session, args, settings: Settings) -> None:
@@ -603,6 +641,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--personal-keys", action="store_true",
                    help="Sus reglas se aplican a las claves personales de la organización (una por organización)")
     p.set_defaults(handler=create_app)
+
+    p = sub.add_parser("set-cache", help="Caché exacta de respuestas de una aplicación (G11)")
+    p.add_argument("--org", required=True)
+    p.add_argument("--app", required=True)
+    p.add_argument("--ttl", type=int, required=True, help="Segundos que se guarda cada respuesta; 0 = sin caché")
+    p.add_argument("--purpose", action="append", help="Propósito con caché (repetible); sin él, todos")
+    p.set_defaults(handler=set_cache)
+
+    p = sub.add_parser("cache-clear", help="Borrar las respuestas guardadas de una organización o aplicación")
+    p.add_argument("--org", required=True)
+    p.add_argument("--app")
+    p.set_defaults(handler=cache_clear)
 
     p = sub.add_parser("create-user", help="Dar de alta a una persona (G10)")
     p.add_argument("--org", required=True)

@@ -87,6 +87,9 @@ class Settings:
     # La cookie de la sesión solo por HTTPS. "auto": sí en producción
     auth_cookie_secure: str = field(default_factory=lambda: _env("AUTH_COOKIE_SECURE", "auto"))
 
+    # --- Caché exacta (G11): tamaño máximo de una respuesta guardada
+    cache_max_bytes: int = field(default_factory=lambda: _int("CACHE_MAX_BYTES", str(512 * 1024)))
+
     # --- Comprobaciones de salud: tiempo máximo por dependencia
     health_timeout_seconds: float = field(default_factory=lambda: _float("HEALTH_TIMEOUT_SECONDS", "2"))
 

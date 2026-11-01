@@ -60,7 +60,8 @@ def _identity(key: ApiKey, app: Application, org: Organization, **extra) -> Iden
         trusted=extra.pop("trusted", app.trusted), allowed_purposes=tuple(app.allowed_purposes or ()),
         allowed_models=tuple(app.allowed_models) if app.allowed_models is not None else None,
         allowed_providers=tuple(org.allowed_providers) if org.allowed_providers is not None else None,
-        audit_salt=org.audit_salt, **extra,
+        audit_salt=org.audit_salt, cache_ttl_seconds=app.cache_ttl_seconds or 0,
+        cache_purposes=tuple(app.cache_purposes) if app.cache_purposes is not None else None, **extra,
     )
 
 

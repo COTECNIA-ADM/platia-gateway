@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prueba en Docker del contrato de inferencia (G3), del streaming (G4), de la reserva (G6),
-# de las cuotas (G7), de la seguridad de contenido (G8), de la auditoría (G9) y de la
-# identidad de personas (G10), repetible y sin coste.
+# de las cuotas (G7), de la seguridad de contenido (G8), de la auditoría (G9), de la
+# identidad de personas (G10) y de la caché (G11), repetible y sin coste.
 #
 # Requisito: la plataforma levantada (docker compose up -d --build --wait).
 # Uso:       bash scripts/prueba_docker.sh
@@ -243,6 +243,24 @@ docker compose up -d --wait redis >/dev/null 2>&1
 echo "ok: con límites y sin Redis → 503"
 [ "$code_luis" = 200 ] || { echo "FALLO: sin límites y sin Redis se esperaba 200 (recibido $code_luis)"; exit 1; }
 echo "ok: sin límites no hace falta Redis → 200"
+echo "== Caché exacta (G11)"
+cli create-app --org "$RUN" --team equipo --slug cache --name Cache --trusted
+cli set-cache --org "$RUN" --app cache --ttl 300
+CKEY="$(cli create-key --org "$RUN" --app cache --label cache | tail -n 1)"
+cache_call() {
+  curl -s -D - -o /dev/null "$BASE/v1/messages" -H "x-api-key: $CKEY" -H 'X-Platia-User-Id: 5' \
+    -H 'content-type: application/json' \
+    -d "{\"model\":\"claude-$RUN\",\"max_tokens\":20,\"messages\":[{\"role\":\"user\",\"content\":\"¿Qué hora es?\"}]}" \
+    | tr -d '\r' | awk -F': ' 'tolower($1) == "x-platia-cache" {print $2}'
+}
+first="$(cache_call)"; second="$(cache_call)"
+echo "primera: $first; segunda: $second"
+[ "$first" = miss ] && [ "$second" = hit ] || { echo "FALLO: la segunda petición igual debía salir de la caché"; exit 1; }
+echo "ok: la misma petición sale de la caché la segunda vez"
+cli cache-clear --org "$RUN" --app cache
+[ "$(cache_call)" = miss ] || { echo "FALLO: tras vaciar la caché se esperaba miss"; exit 1; }
+echo "ok: vaciar la caché obliga a volver a llamar al proveedor"
+
 echo "== Personas: contraseña, MFA, sesiones y claves personales (G10)"
 gw_json() { docker compose exec -T gateway python -c "import json, sys; print(json.load(sys.stdin)$1)"; }
 totp_code() { docker compose exec -T gateway python -c "from app import totp; print(totp.code_at('$1', totp.current_step() + $2))"; }

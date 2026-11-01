@@ -83,6 +83,7 @@ describe 14 etapas; este gateway empieza con 8 y las demás se añaden si hacen 
 | 2 | `security_input` | Jailbreak, marcas de clasificación, secretos | Sin la política, se rechaza (503); nunca se salta | G8 |
 | 3 | `filter` | Datos personales: detectar y tachar según la política | Se rechaza (503) | G8 |
 | 4 | `policy` | Modelo final permitido para esa clave y propósito | Se rechaza (403 o 404) | G3 |
+| 4a | `cache` | Respuesta guardada para la misma petición, aplicación y persona (si la aplicación la activa) | Se sigue sin caché | G11 |
 | 4b | `quota` | Cuotas de gasto, peticiones y tokens por periodo; límites por minuto y de simultáneas | Con límites y sin Redis, se rechaza (503); si no, 402 o 429 | G7 |
 | 5 | `route` | Despliegue y adaptador del proveedor | Se rechaza (503) | G3, G6 |
 | 6 | `execute` | Llamada al proveedor con tiempo máximo y cadena de reserva | Siguiente de la cadena; si no queda, 502 | G3, G6 |
@@ -91,11 +92,13 @@ describe 14 etapas; este gateway empieza con 8 y las demás se añaden si hacen 
 
 Atajos: una etapa puede cortar el pipeline (identidad inválida, bloqueo de seguridad, cuota
 agotada). La auditoría se ejecuta siempre, también en los cortes y cuando el cliente se
-desconecta a mitad de un streaming (bloque `finally`).
+desconecta a mitad de un streaming (bloque `finally`). Un acierto de la caché salta `quota`,
+`route` y `execute`, pero pasa por `security_output` y `audit`
+([ADR-015](adr/ADR-015-cache-exacta.md)).
 
 **En el código** (G3, [ADR-007](adr/ADR-007-contrato-y-pipeline-minimo.md)): cada etapa es
 un módulo de `gateway/app/pipeline/` y `runner.py` fija el orden: `auth` → `policy` →
-`security_input` y `filter` (G8) → `policy` → `quota` (G7) → `route` → apertura de `audit` →
+`security_input` y `filter` (G8) → `policy` → `cache` (G11) → `quota` (G7) → `route` → apertura de `audit` →
 `execute` → `security_output` (G8) → cierre de `audit` y ajuste de `quota`. Los contratos y su
 traducción están en `contracts.py`, los adaptadores en `providers.py` y las rutas en
 `api.py`. Los 401 no se registran en `audit_logs` (solo en el log), para que una clave
@@ -221,7 +224,7 @@ erDiagram
 | --- | --- | --- |
 | `organizations`, `teams`, `users` | Jerarquía de identidad; sal de auditoría por organización; contraseña y MFA de cada persona | G3, G10 |
 | `user_sessions` | Sesiones de las personas: hash de la renovación, caducidad y revocación | G10 |
-| `applications` | Clientes registrados: estado, confianza, propósitos y modelos permitidos; la de las claves personales | G3, G10 |
+| `applications` | Clientes registrados: estado, confianza, propósitos y modelos permitidos; la de las claves personales; su caché | G3, G10, G11 |
 | `api_keys` | Hash y prefijo de cada clave, caducidad y revocación | G3 |
 | `providers` | Cuentas de proveedor con la clave cifrada (AES-256-GCM) | G3 |
 | `llm_models`, `deployments` | Modelos, sus funciones y dónde se sirven, con peso y prioridad | G3, G6 |

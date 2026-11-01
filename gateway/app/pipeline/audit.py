@@ -40,6 +40,13 @@ def compute_cost(usage: Usage, price: ModelPrice | None) -> Decimal:
     return (total / _MTOK).quantize(Decimal("0.00000001"))
 
 
+def _provider(ctx: PipelineContext) -> str | None:
+    # Una respuesta de la caché (G11) no pasa por ningún proveedor
+    if ctx.cache_hit:
+        return "cache"
+    return ctx.target.provider_slug if ctx.target else None
+
+
 def _who(ctx: PipelineContext) -> dict:
     identity = ctx.identity
     return {
@@ -55,7 +62,7 @@ def _who(ctx: PipelineContext) -> dict:
         "requested_model": (ctx.requested_model or "")[:128] or None,
         "model_key": ctx.model.key if ctx.model else None,
         "deployment_id": ctx.target.deployment_id if ctx.target else None,
-        "provider_slug": ctx.target.provider_slug if ctx.target else None,
+        "provider_slug": _provider(ctx),
         # Lo que encontró la seguridad de contenido (G8): categoría, acción y recuento, sin el texto
         "security_flags": list(ctx.security_flags) or None,
     }
@@ -95,7 +102,7 @@ async def close(ctx: PipelineContext, deps: Deps) -> None:
               # Con reserva, el destino final puede no ser el de la apertura (G6)
               "model_key": ctx.model.key if ctx.model else None,
               "deployment_id": ctx.target.deployment_id if ctx.target else None,
-              "provider_slug": ctx.target.provider_slug if ctx.target else None,
+              "provider_slug": _provider(ctx),
               "security_flags": list(ctx.security_flags) or None}
     try:
         async with deps.sessions() as db:
