@@ -13,8 +13,8 @@ Alcance acordado: primero los bloques A y B (G0–G9).
 | G4 | Streaming SSE | Streaming en los dos contratos, auditoría en `finally`, uso real del último fragmento | 4 | Hecha |
 | G5 | Conexión con PLATIA | Red `llm_net`, proveedor «gateway» en `ai_service` tras `LLM_GATEWAY_ENABLED`, cabeceras de persona y tarea, comparación de costes | 26 | Hecha |
 | G6 | Routing y reserva | Selección por propósito, despliegues con salud, enfriamiento y cadenas de reserva | 5–6 | Hecha |
-| G7 | Cuotas, coste y rate limiting | Precios, coste por llamada, cuotas por organización, equipo, aplicación y persona; límites por minuto y de simultáneas (ventanas fijas, ADR-011) | 13–15 | En curso |
-| G8 | Seguridad de contenido | Jailbreak, PII, DLP, firewall y filtro de salida también en streaming | 19–20 | Pendiente |
+| G7 | Cuotas, coste y rate limiting | Precios, coste por llamada, cuotas por organización, equipo, aplicación y persona; límites por minuto y de simultáneas (ventanas fijas, ADR-011) | 13–15 | Hecha |
+| G8 | Seguridad de contenido | Jailbreak, PII, DLP, firewall y filtro de salida también en streaming | 19–20 | En curso |
 | G9 | Auditoría y gobierno | Registro append-only con cadena SHA-256, escritura por lotes, exportación y seudonimización RGPD | 21–22 | Pendiente |
 | G10 | Identidad de personas | JWT con refresh, MFA, revocación, claves personales; SSO/OIDC si hay proveedor | 16–18 | Más adelante |
 | G11 | Eficiencia (opcional) | Caché exacta por organización y compresión ligera | 8–9 | Más adelante |

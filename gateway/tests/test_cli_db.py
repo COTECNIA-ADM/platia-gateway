@@ -232,3 +232,35 @@ def test_limites_por_cli_errores(settings, capsys, client):
     assert "no los dos" in error("set-limit", "--org", "cotecnia", "--team", "plataforma", "--app", "platia",
                                  "--metric", "requests", "--period", "day", "--value", "1")
     assert "No existe" in error("set-limit", "--org", "nadie", "--metric", "requests", "--period", "day", "--value", "1")
+
+
+def test_politica_de_contenido_por_cli(settings, capsys, client, world):
+    def run(*argv):
+        return _run(settings, capsys, *argv)
+
+    code, out, _ = run("content-policies", "--org", "cotecnia")
+    assert code == 0 and "input  jailbreak  block  (por defecto)" in out
+    assert run("set-content-policy", "--org", "cotecnia", "--direction", "input", "--check", "pii",
+               "--action", "redact")[0] == 0
+    code, out, _ = run("set-content-policy", "--org", "cotecnia", "--app", "platia", "--direction", "input",
+                       "--check", "pii", "--action", "log")
+    assert code == 0 and "aplicación platia: input.pii = log" in out
+    assert "input  pii        redact (organización)" in run("content-policies", "--org", "cotecnia")[1]
+    assert "input  pii        log    (aplicación)" in run("content-policies", "--org", "cotecnia", "--app",
+                                                           "platia")[1]
+    # Volver a lo heredado y cambiar de nuevo reutiliza la fila
+    assert run("set-content-policy", "--org", "cotecnia", "--app", "platia", "--direction", "input",
+               "--check", "pii", "--action", "default")[0] == 0
+    assert "input  pii        redact (organización)" in run("content-policies", "--org", "cotecnia", "--app",
+                                                              "platia")[1]
+    assert run("set-content-policy", "--org", "cotecnia", "--app", "platia", "--direction", "input",
+               "--check", "pii", "--action", "block")[0] == 0
+    assert "input  pii        block  (aplicación)" in run("content-policies", "--org", "cotecnia", "--app",
+                                                             "platia")[1]
+
+    code, _, err = run("set-content-policy", "--org", "cotecnia", "--direction", "input", "--check", "jailbreak",
+                       "--action", "redact")
+    assert code == 1 and "no vale para jailbreak" in err
+    code, _, err = run("set-content-policy", "--org", "cotecnia", "--direction", "output", "--check",
+                       "classified", "--action", "log")
+    assert code == 1 and "En la salida no se comprueba" in err

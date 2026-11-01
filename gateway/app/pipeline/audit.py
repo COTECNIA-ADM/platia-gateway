@@ -50,6 +50,8 @@ def _who(ctx: PipelineContext) -> dict:
         "model_key": ctx.model.key if ctx.model else None,
         "deployment_id": ctx.target.deployment_id if ctx.target else None,
         "provider_slug": ctx.target.provider_slug if ctx.target else None,
+        # Lo que encontró la seguridad de contenido (G8): categoría, acción y recuento, sin el texto
+        "security_flags": list(ctx.security_flags) or None,
     }
 
 
@@ -87,7 +89,8 @@ async def close(ctx: PipelineContext, deps: Deps) -> None:
               # Con reserva, el destino final puede no ser el de la apertura (G6)
               "model_key": ctx.model.key if ctx.model else None,
               "deployment_id": ctx.target.deployment_id if ctx.target else None,
-              "provider_slug": ctx.target.provider_slug if ctx.target else None}
+              "provider_slug": ctx.target.provider_slug if ctx.target else None,
+              "security_flags": list(ctx.security_flags) or None}
     try:
         async with deps.sessions() as db:
             if ctx.model is not None and (usage.input or usage.output or usage.cache_read or usage.cache_write):

@@ -79,8 +79,8 @@ describe 14 etapas; este gateway empieza con 8 y las demás se añaden si hacen 
 | # | Etapa | Qué resuelve | Si falla su dependencia | Fase |
 | --- | --- | --- | --- | --- |
 | 1 | `auth` | Clave → aplicación o persona → equipo → organización activa; persona y propósito declarados | Se rechaza (401) | G3 |
-| 2 | `security_input` | Jailbreak, marcas de clasificación, secretos | Reglas por defecto en memoria; nunca se salta | G8 |
-| 3 | `filter` | Datos personales: detectar y tachar según la política | Reglas por defecto en memoria | G8 |
+| 2 | `security_input` | Jailbreak, marcas de clasificación, secretos | Sin la política, se rechaza (503); nunca se salta | G8 |
+| 3 | `filter` | Datos personales: detectar y tachar según la política | Se rechaza (503) | G8 |
 | 4 | `policy` | Modelo final permitido para esa clave y propósito | Se rechaza (403 o 404) | G3 |
 | 4b | `quota` | Cuotas de gasto, peticiones y tokens por periodo; límites por minuto y de simultáneas | Con límites y sin Redis, se rechaza (503); si no, 402 o 429 | G7 |
 | 5 | `route` | Despliegue y adaptador del proveedor | Se rechaza (503) | G3, G6 |
@@ -94,8 +94,8 @@ desconecta a mitad de un streaming (bloque `finally`).
 
 **En el código** (G3, [ADR-007](adr/ADR-007-contrato-y-pipeline-minimo.md)): cada etapa es
 un módulo de `gateway/app/pipeline/` y `runner.py` fija el orden: `auth` → `policy` →
-`quota` (G7) → `route` → apertura de `audit` → `execute` → cierre de `audit` y ajuste de
-`quota`. Los contratos y su
+`security_input` y `filter` (G8) → `policy` → `quota` (G7) → `route` → apertura de `audit` →
+`execute` → `security_output` (G8) → cierre de `audit` y ajuste de `quota`. Los contratos y su
 traducción están en `contracts.py`, los adaptadores en `providers.py` y las rutas en
 `api.py`. Los 401 no se registran en `audit_logs` (solo en el log), para que una clave
 falsa no pueda escribir en la base.
@@ -119,6 +119,13 @@ persona) y, con un guion Lua, comprueba y sube a la vez sus contadores en Redis.
 peticiones o tokens de día o de mes agotados: 402; por minuto o simultáneas: 429. Al
 terminar, `quota.settle` suma el coste y los tokens reales y libera la simultánea. Los
 contadores de día y de mes se reconstruyen desde la auditoría si faltan.
+
+**Seguridad de contenido** (G8, [ADR-012](adr/ADR-012-seguridad-de-contenido.md)):
+`security_input` y `filter` buscan en el texto de la petición manipulación, marcas de
+clasificación, secretos y datos personales (`content.py`) y aplican la política de
+`content_policies`: bloquear, tachar o anotar. `security_output` hace lo mismo con la
+respuesta y, en streaming, `streaming.OutputFilter` lo hace por trozos. Lo encontrado va a
+`audit_logs.security_flags`, sin el texto.
 
 **Etapas del libro que no entran ahora**: ganchos corporativos antes y después del chat
 (con los webhooks de G12), caché exacta y semántica (G11, opcional), contexto RAG (PLATIA
@@ -205,6 +212,7 @@ erDiagram
 | `llm_models`, `deployments` | Modelos, sus funciones y dónde se sirven, con peso y prioridad | G3, G6 |
 | `model_prices` | USD por millón de tokens desde una fecha, incluida la caché | G3, G7 |
 | `usage_limits` | Cuotas y límites de ritmo por ámbito, métrica y periodo | G7 |
+| `content_policies` | Acción por categoría de contenido, sentido y organización o aplicación | G8 |
 | `audit_logs` | Una fila por petición: quién, qué, resultado, tokens, coste, hashes | G3, G9 |
 
 `audit_logs` no tiene claves foráneas, para sobrevivir a cambios en la configuración.

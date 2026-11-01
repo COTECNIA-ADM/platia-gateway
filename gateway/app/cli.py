@@ -7,7 +7,7 @@ Uso dentro de Docker (el contenedor de migraciones tiene acceso a MySQL):
 Órdenes: create-org, create-team, create-app, create-key, revoke-key, create-provider,
 create-model, set-fallbacks (cadena de reserva), create-deployment, set-deployment
 (prioridad, peso o estado), set-price, set-limit, remove-limit y limits (cuotas y límites de
-ritmo, G7), show y usage (consumo y coste, para compararlo con lo que registra PLATIA).
+ritmo, G7), set-content-policy y content-policies (seguridad de contenido, G8), show y usage (consumo y coste, para compararlo con lo que registra PLATIA).
 `python -m app.cli <orden> -h` explica cada una.
 
 La clave de un proveedor nunca va como argumento (quedaría en el historial de la shell):
@@ -28,8 +28,10 @@ from sqlalchemy.orm import Session
 
 from .crypto import encrypt, load_key
 from .keys import new_application_key
+from .content_policy import ALLOWED, DEFAULTS
 from .limits import window
-from .models import (ApiKey, Application, ApplicationStatus, AuditLog, AuditStatus, Deployment, KeyKind,
+from .models import (ApiKey, Application, ApplicationStatus, AuditLog, AuditStatus, ContentAction, ContentCheck,
+                     ContentPolicy, Deployment, Direction, KeyKind, PolicyScope,
                      LimitMetric, LimitPeriod, LimitScope, LlmModel, ModelFamily, ModelPrice, Organization, Provider,
                      ProviderKind, Team, UsageLimit)
 from .models.base import utcnow
@@ -306,6 +308,52 @@ def limits(db: Session, args, settings: Settings) -> None:
              f" (aviso {limit.alert_pct} %){shown}{state}")
 
 
+def set_content_policy(db: Session, args, settings: Settings) -> None:
+    org = _org(db, args.org)
+    key = (args.direction, args.check)
+    if key not in ALLOWED:
+        raise CliError(f"En la {'salida' if args.direction == Direction.OUTPUT else 'entrada'} no se comprueba "
+                       f"'{args.check}'")
+    if args.action != "default" and ContentAction(args.action) not in ALLOWED[key]:
+        valid = ", ".join(sorted(ALLOWED[key]))
+        raise CliError(f"'{args.action}' no vale para {args.check}: usa {valid} o default")
+    if args.app:
+        app = _one(db, Application, organization_id=org.id, slug=args.app, deleted_at=None)
+        scope, scope_id, label = PolicyScope.APPLICATION, app.id, f"aplicación {app.slug}"
+    else:
+        scope, scope_id, label = PolicyScope.ORGANIZATION, org.id, f"organización {org.slug}"
+    row = db.execute(select(ContentPolicy).filter_by(scope=scope, scope_id=scope_id, direction=args.direction,
+                                                     check_name=args.check)).scalar_one_or_none()
+    if args.action == "default":
+        if row is not None and row.deleted_at is None:
+            row.deleted_at = utcnow()
+        _out(f"{label}: {args.direction}.{args.check} vuelve a lo heredado")
+        return
+    if row is None:
+        db.add(ContentPolicy(scope=scope, scope_id=scope_id, direction=args.direction, check_name=args.check,
+                             action=args.action))
+    else:  # se reutiliza la fila (también si estaba borrada): una sola por casilla
+        row.action, row.deleted_at = args.action, None
+    db.flush()
+    _out(f"{label}: {args.direction}.{args.check} = {args.action}")
+
+
+def content_policies(db: Session, args, settings: Settings) -> None:
+    """La política efectiva de una organización (o de una de sus aplicaciones) y de dónde sale cada casilla."""
+    org = _org(db, args.org)
+    scopes = [(PolicyScope.ORGANIZATION, org.id, "organización")]
+    if args.app:
+        app = _one(db, Application, organization_id=org.id, slug=args.app, deleted_at=None)
+        scopes.append((PolicyScope.APPLICATION, app.id, "aplicación"))
+    effective = {key: (action, "por defecto") for key, action in DEFAULTS.items()}
+    for scope, scope_id, origin in scopes:
+        for row in db.execute(select(ContentPolicy).filter_by(scope=scope, scope_id=scope_id, deleted_at=None)):
+            row = row[0]
+            effective[(row.direction, row.check_name)] = (row.action, origin)
+    for (direction, check), (action, origin) in effective.items():
+        _out(f"{direction:<6} {check:<10} {action:<6} ({origin})")
+
+
 def show(db: Session, args, settings: Settings) -> None:
     for org in db.execute(select(Organization).where(Organization.deleted_at.is_(None))).scalars():
         _out(f"Organización {org.slug} ({'activa' if org.is_active else 'inactiva'})")
@@ -471,6 +519,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("limits", help="Límites configurados y consumo del periodo actual")
     p.set_defaults(handler=limits)
+
+    p = sub.add_parser("set-content-policy", help="Qué hacer con un tipo de contenido (G8)")
+    p.add_argument("--org", required=True)
+    p.add_argument("--app", help="Solo para esta aplicación (manda sobre la organización)")
+    p.add_argument("--direction", required=True, type=Direction, choices=list(Direction))
+    p.add_argument("--check", required=True, type=ContentCheck, choices=list(ContentCheck))
+    p.add_argument("--action", required=True, choices=[*ContentAction, "default"],
+                   help="block, redact, log, off, o default para volver a lo heredado")
+    p.set_defaults(handler=set_content_policy)
+
+    p = sub.add_parser("content-policies", help="Política de contenido efectiva y de dónde sale")
+    p.add_argument("--org", required=True)
+    p.add_argument("--app")
+    p.set_defaults(handler=content_policies)
 
     p = sub.add_parser("show", help="Resumen de organizaciones, aplicaciones y modelos")
     p.set_defaults(handler=show)

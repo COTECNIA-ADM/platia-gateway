@@ -75,6 +75,9 @@ class PipelineContext:
     end_user_ref: str | None = None
     # policy (el modelo pedido) y execute (el que atiende, si hubo reserva)
     model: ModelInfo | None = None
+    # security_input (G8): acción por (sentido, categoría) y lo encontrado, sin el texto
+    content_actions: dict = field(default_factory=dict)
+    security_flags: list[dict] = field(default_factory=list)
     # quota (G7): contadores admitidos, para ajustarlos al terminar (`quota.settle`)
     quota: Any = None
     # route: destinos en el orden en que se prueban

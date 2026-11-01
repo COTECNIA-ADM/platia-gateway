@@ -87,6 +87,22 @@ renueva); un límite por minuto o de simultáneas, 429 con `Retry-After`. Al pas
 queda un aviso `quota.alert` en el log. Con límites, si Redis no responde, el gateway
 rechaza la petición (503). Detalles en [ADR-011](docs/adr/ADR-011-cuotas-y-limites.md).
 
+## Seguridad de contenido
+
+El gateway revisa el texto de cada petición y de cada respuesta. Por defecto bloquea los
+intentos de saltarse las instrucciones del modelo (403), tacha los secretos (claves de API,
+contraseñas) antes de enviarlos al proveedor y solo anota los datos personales y las marcas
+de clasificación. Cada organización o aplicación lo cambia:
+
+```bash
+cli content-policies --org cotecnia --app platia                                     # política efectiva
+cli set-content-policy --org cotecnia --direction input --check pii --action redact   # tachar datos personales
+cli set-content-policy --org cotecnia --app platia --direction input --check pii --action default
+```
+
+Lo encontrado (tipo y número, nunca el dato) queda en `security_flags` de la auditoría y
+en la cabecera `X-Platia-Content-Flags`. Detalles en [ADR-012](docs/adr/ADR-012-seguridad-de-contenido.md).
+
 ## Conexión con PLATIA
 
 `bash scripts/alta_platia.sh` (con `ANTHROPIC_API_KEY` exportada) da de alta PLATIA con sus
