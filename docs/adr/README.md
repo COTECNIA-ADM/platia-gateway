@@ -20,3 +20,4 @@ descartaron. Para cambiar una decisión se escribe un ADR nuevo que sustituya al
 | [013](ADR-013-auditoria-verificable.md) | Auditoría verificable: sellado posterior en cadena SHA-256, disparadores y seudonimización por huella | Aceptado |
 | [014](ADR-014-identidad-de-personas.md) | Identidad de personas: contraseña, TOTP, sesiones en MySQL y claves personales | Aceptado |
 | [015](ADR-015-cache-exacta.md) | Caché exacta por aplicación y persona, cifrada en Redis; sin compresión de prompts | Aceptado |
+| [016](ADR-016-telemetria.md) | Telemetría con Prometheus, avisos por webhook firmado en cola de MySQL y eventos en tiempo real por WebSocket | Aceptado |

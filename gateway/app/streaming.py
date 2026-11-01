@@ -29,6 +29,7 @@ from .contracts import (STOP_TO_ANTHROPIC, STOP_TO_OPENAI, Usage, merge_anthropi
                         usage_from_openai)
 from .errors import ContentBlocked, GatewayError, UpstreamFailed, UpstreamTimeout
 from .models import ContentAction, ContentCheck, Contract, Direction
+from . import telemetry
 from .pipeline import audit, quota
 from .pipeline.context import Deps, PipelineContext
 from .providers import sanitize
@@ -420,6 +421,7 @@ async def relay_stream(ctx: PipelineContext, deps: Deps, upstream: httpx.Respons
             await upstream.aclose()
             await audit.close(ctx, deps)
             await quota.settle(ctx, deps)
+            await telemetry.finish(ctx, deps)
         ctx.finished = True
         log.info("request.streamed", request_id=ctx.request_id, contract=ctx.contract, model=ctx.model.key,
                  provider=ctx.target.provider_slug, status=ctx.error.status if ctx.error else 200,

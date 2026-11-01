@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
 from ..contracts import check_basics
+from .. import telemetry
 from ..errors import GatewayError, InternalError, InvalidRequest, RequestTooLarge, Unavailable, error_response
 from ..models import Contract
 from ..streaming import streaming_response
@@ -64,6 +65,7 @@ async def run_inference(request: Request, contract: Contract):
             # Respuesta guardada (G11): ni cuota ni proveedor; sí filtro de salida y auditoría
             await audit.open_record(ctx, deps)
             await security_output.run(ctx, deps)
+            ctx.mark_ready()
             await audit.close(ctx, deps)
             ctx.finished = True
             return _response(ctx, contract)
@@ -73,10 +75,12 @@ async def run_inference(request: Request, contract: Contract):
         if ctx.stream:
             # A partir de aquí la respuesta (y el cierre de la auditoría) es del generador
             upstream = await execute.open_upstream_stream(ctx, deps)
+            ctx.mark_ready()
         else:
             await execute.run(ctx, deps)
             await cache.store(ctx, deps)
             await security_output.run(ctx, deps)
+            ctx.mark_ready()
             await audit.close(ctx, deps)
             ctx.finished = True
     except GatewayError as exc:
@@ -95,8 +99,9 @@ async def run_inference(request: Request, contract: Contract):
                         # Cancelada a mitad (cliente desconectado o apagado): también se registra
                         ctx.error = GatewayError("Petición cancelada", status=499, kind="cancelled")
                     await audit.close(ctx, deps)
-                # Con streaming, los contadores los ajusta el generador al terminar
+                # Con streaming, los contadores y la telemetría los cierra el generador al terminar
                 await quota.settle(ctx, deps)
+                await telemetry.finish(ctx, deps)
 
     if ctx.error is not None:
         log.info("request.failed", request_id=ctx.request_id, contract=contract, status=ctx.error.status,
@@ -115,7 +120,7 @@ def _response(ctx: PipelineContext, contract: Contract) -> JSONResponse:
              application=ctx.identity.application_slug, purpose=ctx.purpose, model=ctx.model.key,
              provider="cache" if ctx.cache_hit else ctx.target.provider_slug, attempts=ctx.attempts,
              input_tokens=ctx.usage.input, output_tokens=ctx.usage.output, cost_usd=str(ctx.cost_usd),
-             latency_ms=ctx.elapsed_ms(), cache=ctx.cache_state)
+             latency_ms=ctx.elapsed_ms(), overhead_ms=ctx.overhead_ms, cache=ctx.cache_state)
     headers = {
         "X-Request-ID": ctx.request_id,
         "X-Platia-Model-Used": ctx.model.key,

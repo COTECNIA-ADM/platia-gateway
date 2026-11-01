@@ -133,6 +133,23 @@ cli cache-clear --org cotecnia --app platia                # vaciarla
 Cada respuesta lleva `X-Platia-Cache: miss` o `hit`, y una petición se la salta con
 `X-Platia-Cache: no`. Detalles en [ADR-015](docs/adr/ADR-015-cache-exacta.md).
 
+## Métricas y avisos
+
+`/metrics` (Prometheus, con `METRICS_TOKEN`) da peticiones, tokens, coste, errores de
+proveedor y el tiempo propio del gateway. Los avisos de cuota, los bloqueos de seguridad y
+los despliegues enfriados llegan firmados a los webhooks que se den de alta, y el panel los
+verá en tiempo real por WebSocket.
+
+```bash
+cli create-webhook --org cotecnia --name "Avisos IA" --url https://avisos.cotecnia.es/platia \
+    --event quota.alert --event quota.exhausted --event security.blocked
+cli webhook-test --id 1
+cli latency --since 2026-11-01        # p50, p95 y p99 del tiempo propio (objetivo: p95 < 50 ms)
+```
+
+Cómo comprobar la firma en el receptor, la lista de métricas y el WebSocket:
+[docs/telemetria.md](docs/telemetria.md) y [ADR-016](docs/adr/ADR-016-telemetria.md).
+
 ## Personas y claves personales
 
 Las personas entran con contraseña y una app autenticadora (TOTP) en `/auth/login`; el panel

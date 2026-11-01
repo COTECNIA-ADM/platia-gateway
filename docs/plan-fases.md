@@ -17,8 +17,8 @@ Alcance acordado: bloques A y B (G0–G9, hechos) y después el bloque C (G10–
 | G8 | Seguridad de contenido | Jailbreak, PII, DLP, firewall y filtro de salida también en streaming | 19–20 | Hecha |
 | G9 | Auditoría y gobierno | Registro append-only con cadena SHA-256, sellado y conciliación, exportación y seudonimización RGPD (ADR-013) | 21–22 | Hecha |
 | G10 | Identidad de personas | Contraseña y TOTP, sesiones revocables con renovación rotada, claves personales (ADR-014); SSO/OIDC cuando se elija proveedor | 16–18 | Hecha |
-| G11 | Eficiencia (opcional) | Caché exacta por aplicación y persona, cifrada y opcional (ADR-015); sin compresión de prompts | 8–9 | En curso |
-| G12 | Telemetría | Métricas, logs, tiempo real por WebSocket y webhooks firmados | 24 | Más adelante |
+| G11 | Eficiencia (opcional) | Caché exacta por aplicación y persona, cifrada y opcional (ADR-015); sin compresión de prompts | 8–9 | Hecha |
+| G12 | Telemetría | Métricas de Prometheus, tiempo propio del gateway (RNF-06), avisos por webhook firmado y tiempo real por WebSocket (ADR-016) | 24 | En curso |
 | G13 | Panel de administración | App React: operaciones, proveedores y routing, cuotas, firewall, auditoría | 27–29 | Más adelante |
 | G14 | Portal de usuario | Cuenta, seguridad, claves y consumo propios | 30–31 | Más adelante |
 | G15 | Despliegue y operación | Compose de producción, Nginx endurecido, Celery, GHCR, copias y restauración | 33–34 | Más adelante |

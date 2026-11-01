@@ -27,7 +27,8 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
   `set-price`, `set-fallbacks`, `set-deployment`, `set-limit`, `remove-limit`, `limits`,
   `set-content-policy`, `content-policies`, `audit-seal`, `audit-verify`, `audit-export`,
   `audit-pseudonymize`, `create-user`, `set-user`, `set-password`, `reset-mfa`,
-  `revoke-sessions`, `set-cache`, `cache-clear`, `revoke-key`,
+  `revoke-sessions`, `set-cache`, `cache-clear`, `revoke-key`, `create-webhook`, `webhooks`,
+  `set-webhook`, `webhook-test`, `latency`,
   `show`, `usage`; `--exists-ok` para
   guiones que se repiten)
 - Prueba en Docker sin coste (con la plataforma levantada): `bash scripts/prueba_docker.sh`
@@ -76,6 +77,13 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
 - Caché (ADR-015): opcional por aplicación, la clave incluye la persona final y el valor va
   cifrado; un acierto pasa por `security_output` y la auditoría (proveedor `cache`). Si Redis
   falla, se sigue sin caché.
+- Telemetría (ADR-016): métricas en `app/telemetry.py` con etiquetas de cardinalidad baja
+  (nunca persona, clave ni id de petición); `/metrics` exige `METRICS_TOKEN` y Nginx no la
+  publica. Los avisos salen con `events.emit` (nunca rompe la petición; lo repetible lleva
+  `dedupe`), van a Redis y a la cola `webhook_deliveries`, y se firman con
+  `X-Platia-Signature: t=…,v1=…`. Un destino de webhook pasa por la comprobación SSRF de
+  `app/webhooks.py` (https, dirección pública fijada, sin redirecciones). Ningún evento lleva
+  texto de prompts o respuestas ni claves.
 - Cada fase llega en un PR con tests, `ruff` y cobertura en verde, y una prueba en Docker
   que se pueda repetir.
 - No exponer MySQL ni Redis fuera de `data_net`. Nginx solo publica las rutas que tocan.

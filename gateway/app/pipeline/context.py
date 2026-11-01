@@ -94,6 +94,10 @@ class PipelineContext:
     upstream_body: dict | None = None
     hide_usage_chunk: bool = False
     attempts: int = 0
+    # Tiempo esperando al proveedor (todos los intentos) y tiempo propio del gateway hasta
+    # tener la respuesta lista (G12, RNF-06)
+    upstream_seconds: float = 0.0
+    overhead_seconds: float | None = None
     # cache (G11): off, miss o hit; la clave solo si se puede guardar la respuesta
     cache_state: str = "off"
     cache_key: str | None = None
@@ -106,6 +110,17 @@ class PipelineContext:
     cost_usd: Decimal = Decimal("0")
     error: GatewayError | None = None
     finished: bool = False
+    # telemetría (G12): las métricas de la petición ya se han registrado
+    observed: bool = False
 
     def elapsed_ms(self) -> int:
         return int((perf_counter() - self.started) * 1000)
+
+    def mark_ready(self) -> None:
+        """La respuesta está lista para salir (o, en streaming, para empezar a salir): lo
+        que ha pasado desde el principio sin contar al proveedor es tiempo del gateway."""
+        self.overhead_seconds = max(0.0, perf_counter() - self.started - self.upstream_seconds)
+
+    @property
+    def overhead_ms(self) -> int | None:
+        return None if self.overhead_seconds is None else round(self.overhead_seconds * 1000)

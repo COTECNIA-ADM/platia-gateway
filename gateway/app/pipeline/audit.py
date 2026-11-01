@@ -97,6 +97,7 @@ async def close(ctx: PipelineContext, deps: Deps) -> None:
         status = AuditStatus.BLOCKED if blocked else AuditStatus.ERROR
     values = {"status": status, "http_status": error.status if error else 200,
               "error_type": error.kind if error else None, "completed_at": utcnow(), "latency_ms": ctx.elapsed_ms(),
+              "overhead_ms": ctx.overhead_ms,
               "input_tokens": usage.input, "output_tokens": usage.output, "cache_read_tokens": usage.cache_read,
               "cache_write_tokens": usage.cache_write, "attempts": ctx.attempts,
               # Con reserva, el destino final puede no ser el de la apertura (G6)

@@ -87,6 +87,14 @@ services:
       LOGIN_LOCKOUT_SECONDS: ${LOGIN_LOCKOUT_SECONDS:-900}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-auto}
       CACHE_MAX_BYTES: ${CACHE_MAX_BYTES:-524288}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      EVENT_DEDUP_SECONDS: ${EVENT_DEDUP_SECONDS:-300}
+      WEBHOOK_POLL_SECONDS: ${WEBHOOK_POLL_SECONDS:-2}
+      WEBHOOK_TIMEOUT_SECONDS: ${WEBHOOK_TIMEOUT_SECONDS:-10}
+      WEBHOOK_MAX_ATTEMPTS: ${WEBHOOK_MAX_ATTEMPTS:-6}
+      WEBHOOK_RETENTION_DAYS: ${WEBHOOK_RETENTION_DAYS:-30}
+      WEBHOOK_PRIVATE_HOSTS: ${WEBHOOK_PRIVATE_HOSTS:-}
+      REALTIME_RECHECK_SECONDS: ${REALTIME_RECHECK_SECONDS:-30}
       AUDIT_PENDING_MAX_SECONDS: ${AUDIT_PENDING_MAX_SECONDS:-2400}
     depends_on:
       mysql:
@@ -96,7 +104,10 @@ services:
 
   gateway:
     build: ./gateway
-    environment: *gateway-env
+    environment:
+      <<: *gateway-env
+      # Métricas de los dos procesos de uvicorn sumadas en /metrics (G12); se vacía al arrancar
+      PROMETHEUS_MULTIPROC_DIR: /tmp/metrics
     depends_on:
       mysql:
         condition: service_healthy

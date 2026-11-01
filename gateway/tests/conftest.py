@@ -45,7 +45,7 @@ def alembic_config(connection) -> Config:
 
 KEY_B64 = base64.urlsafe_b64encode(b"k" * 32).decode()
 JWT_SECRET = "s" * 48
-TABLES = ["user_sessions", "audit_chain_state", "content_policies", "usage_limits", "audit_logs", "api_keys", "model_prices", "deployments", "llm_models", "providers", "applications",
+TABLES = ["webhook_deliveries", "webhooks", "user_sessions", "audit_chain_state", "content_policies", "usage_limits", "audit_logs", "api_keys", "model_prices", "deployments", "llm_models", "providers", "applications",
           "users", "teams", "organizations"]
 
 ANTHROPIC_REPLY = {"id": "msg_up", "type": "message", "role": "assistant", "model": "claude-upstream",
@@ -190,7 +190,7 @@ def client(world, upstream, redis_fake):
     url = make_url(URL)
     settings = Settings(db_host=url.host, db_port=url.port or 3306, db_user=url.username, db_password=url.password,
                         db_name=url.database, encryption_key=KEY_B64, log_format="console",
-                        audit_seal_interval_seconds=0, jwt_secret=JWT_SECRET)
+                        audit_seal_interval_seconds=0, jwt_secret=JWT_SECRET, webhook_poll_seconds=0)
     with TestClient(create_app(settings, transport=httpx.MockTransport(upstream),
                                redis_client=redis_fake)) as test_client:
         yield test_client
