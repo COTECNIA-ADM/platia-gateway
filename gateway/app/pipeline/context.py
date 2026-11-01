@@ -41,6 +41,8 @@ class Identity:
     allowed_providers: tuple[str, ...] | None
     # Sal de la organización para las huellas de la auditoría (G9); nunca sale del gateway
     audit_salt: str = field(default="", repr=False)
+    # Clave personal (G10): la persona dueña de la clave. Con clave de aplicación, None
+    user_id: int | None = None
 
 
 @dataclass(frozen=True)

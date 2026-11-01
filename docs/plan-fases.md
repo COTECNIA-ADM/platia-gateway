@@ -2,7 +2,7 @@
 
 Cada fase es un PR revisable con tests en la CI y una prueba en Docker. El bloque A
 termina con PLATIA usando el gateway; los bloques B a D añaden control sin tocar PLATIA.
-Alcance acordado: primero los bloques A y B (G0–G9).
+Alcance acordado: bloques A y B (G0–G9, hechos) y después el bloque C (G10–G14).
 
 | # | Fase | Qué se construye | Capítulos | Estado |
 | --- | --- | --- | --- | --- |
@@ -15,8 +15,8 @@ Alcance acordado: primero los bloques A y B (G0–G9).
 | G6 | Routing y reserva | Selección por propósito, despliegues con salud, enfriamiento y cadenas de reserva | 5–6 | Hecha |
 | G7 | Cuotas, coste y rate limiting | Precios, coste por llamada, cuotas por organización, equipo, aplicación y persona; límites por minuto y de simultáneas (ventanas fijas, ADR-011) | 13–15 | Hecha |
 | G8 | Seguridad de contenido | Jailbreak, PII, DLP, firewall y filtro de salida también en streaming | 19–20 | Hecha |
-| G9 | Auditoría y gobierno | Registro append-only con cadena SHA-256, sellado y conciliación, exportación y seudonimización RGPD (ADR-013) | 21–22 | En curso |
-| G10 | Identidad de personas | JWT con refresh, MFA, revocación, claves personales; SSO/OIDC si hay proveedor | 16–18 | Más adelante |
+| G9 | Auditoría y gobierno | Registro append-only con cadena SHA-256, sellado y conciliación, exportación y seudonimización RGPD (ADR-013) | 21–22 | Hecha |
+| G10 | Identidad de personas | Contraseña y TOTP, sesiones revocables con renovación rotada, claves personales (ADR-014); SSO/OIDC cuando se elija proveedor | 16–18 | En curso |
 | G11 | Eficiencia (opcional) | Caché exacta por organización y compresión ligera | 8–9 | Más adelante |
 | G12 | Telemetría | Métricas, logs, tiempo real por WebSocket y webhooks firmados | 24 | Más adelante |
 | G13 | Panel de administración | App React: operaciones, proveedores y routing, cuotas, firewall, auditoría | 27–29 | Más adelante |

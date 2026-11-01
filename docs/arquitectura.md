@@ -50,6 +50,7 @@ flowchart LR
 | `POST /v1/chat/completions` | OpenAI Chat Completions | Clientes compatibles con OpenAI | G3 (G4 streaming) |
 | `GET /v1/models` | OpenAI | Saber qué modelos puede usar una clave | G3 |
 | `GET /health` | Propio | Nginx y monitorización | G0 |
+| `/auth/*` y `/me/*` | Propio (JSON) | Personas: sesión, MFA y claves personales; el panel y el portal | G10 |
 
 Los dos contratos convergen en el mismo pipeline: la diferencia está solo en cómo se lee la
 entrada y cómo se da forma a la salida. Cuando la petición y el proveedor son de la misma
@@ -163,6 +164,11 @@ flowchart TD
 - Políticas en cascada (persona → equipo → organización): se toma el valor más específico
   configurado; si una política exige un techo del nivel superior, se comprueba aparte.
 - Sin dispositivos ni device binding en este alcance ([ADR-004](adr/ADR-004-identidad.md)).
+- Las **personas** entran en el panel y el portal con contraseña y TOTP; la sesión se
+  comprueba en MySQL en cada petición, así que revocarla surte efecto al momento. Sus
+  **claves personales** siguen las reglas de la aplicación de la organización marcada para
+  ellas, y la persona queda como persona final de cada llamada
+  ([ADR-014](adr/ADR-014-identidad-de-personas.md)).
 
 ## Reparto con PLATIA
 
@@ -204,6 +210,7 @@ erDiagram
     teams ||--o{ applications : posee
     applications ||--o{ api_keys : "claves plgw-app-"
     users ||--o{ api_keys : "claves plgw-usr-"
+    users ||--o{ user_sessions : "inicia"
     providers ||--o{ deployments : sirve
     llm_models ||--o{ deployments : "se despliega en"
     llm_models ||--o{ model_prices : "precio desde"
@@ -212,8 +219,9 @@ erDiagram
 
 | Tabla | Qué guarda | Fase en que se usa |
 | --- | --- | --- |
-| `organizations`, `teams`, `users` | Jerarquía de identidad; sal de auditoría por organización | G3, G10 |
-| `applications` | Clientes registrados: estado, confianza, propósitos y modelos permitidos | G3 |
+| `organizations`, `teams`, `users` | Jerarquía de identidad; sal de auditoría por organización; contraseña y MFA de cada persona | G3, G10 |
+| `user_sessions` | Sesiones de las personas: hash de la renovación, caducidad y revocación | G10 |
+| `applications` | Clientes registrados: estado, confianza, propósitos y modelos permitidos; la de las claves personales | G3, G10 |
 | `api_keys` | Hash y prefijo de cada clave, caducidad y revocación | G3 |
 | `providers` | Cuentas de proveedor con la clave cifrada (AES-256-GCM) | G3 |
 | `llm_models`, `deployments` | Modelos, sus funciones y dónde se sirven, con peso y prioridad | G3, G6 |

@@ -5,11 +5,12 @@ from .content import ContentAction, ContentCheck, ContentPolicy, Direction, Poli
 from .keys import ApiKey, KeyKind
 from .limits import LimitMetric, LimitPeriod, LimitScope, UsageLimit
 from .llm import Deployment, LlmModel, ModelFamily, ModelPrice, Provider, ProviderKind
+from .sessions import UserSession
 from .tenancy import Application, ApplicationStatus, Organization, Team, User, UserRole
 
 __all__ = [
     "ApiKey", "Application", "ApplicationStatus", "AuditChainState", "AuditLog", "AuditStatus", "Base", "ContentAction", "ContentCheck",
     "ContentPolicy", "Contract", "Deployment", "Direction", "PolicyScope",
     "KeyKind", "LimitMetric", "LimitPeriod", "LimitScope", "LlmModel", "ModelFamily", "ModelPrice", "Organization", "Provider", "ProviderKind", "Team", "User",
-    "UsageLimit", "UserRole", "utcnow",
+    "UsageLimit", "UserRole", "UserSession", "utcnow",
 ]

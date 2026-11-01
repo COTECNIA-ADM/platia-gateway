@@ -1,8 +1,9 @@
 """Identidad: organización → equipo → persona, y aplicaciones colgando de un equipo (ADR-004)."""
 import secrets
+from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import JSON, Boolean, Enum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, SoftDeleteMixin, TimestampMixin
@@ -45,7 +46,7 @@ class UserRole(StrEnum):
 
 
 class User(TimestampMixin, SoftDeleteMixin, Base):
-    """Persona de la organización. Contraseña, MFA y sesiones llegan en G10."""
+    """Persona de la organización. Entra en el panel y el portal con contraseña y MFA (G10, ADR-014)."""
 
     __tablename__ = "users"
     __table_args__ = (UniqueConstraint("organization_id", "email", name="uq_users_org_email"),)
@@ -61,6 +62,16 @@ class User(TimestampMixin, SoftDeleteMixin, Base):
                                                 native_enum=False, length=16),
                                            default=UserRole.MEMBER, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # scrypt (app/passwords.py). NULL: no puede iniciar sesión con contraseña
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    password_changed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Secreto TOTP cifrado con app/crypto.py (contexto "user-mfa:<id>"). Se guarda al
+    # empezar la configuración; solo cuenta cuando mfa_enabled es verdadero.
+    mfa_secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Último paso TOTP aceptado: el mismo código no sirve dos veces
+    mfa_last_step: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class ApplicationStatus(StrEnum):
@@ -91,3 +102,6 @@ class Application(TimestampMixin, SoftDeleteMixin, Base):
     allowed_purposes: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     # Lista cerrada de modelos (model_key). NULL = los que permita la organización.
     allowed_models: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Sus reglas (modelos, propósitos, límites, contenido) se aplican a las claves personales
+    # de la organización (G10). Como mucho una por organización (lo comprueba la CLI).
+    personal_keys: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

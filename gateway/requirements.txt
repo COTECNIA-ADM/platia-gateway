@@ -12,3 +12,5 @@ cryptography>=44
 # Migraciones del esquema (desde G2)
 alembic~=1.14
 redis~=5.2
+# Tokens de acceso de las personas (G10)
+pyjwt~=2.10

@@ -72,6 +72,21 @@ class Settings:
     # Por encima de la duración máxima de un streaming más el tiempo de espera del proveedor
     audit_pending_max_seconds: float = field(default_factory=lambda: _float("AUDIT_PENDING_MAX_SECONDS", "2400"))
 
+    # --- Identidad de personas (G10, ADR-014): panel y portal. Sin JWT_SECRET no se puede
+    # iniciar sesión (503); las claves de aplicación y personales funcionan igual.
+    jwt_secret: str = field(default_factory=lambda: _env("JWT_SECRET"))
+    access_token_minutes: int = field(default_factory=lambda: _int("ACCESS_TOKEN_MINUTES", "15"))
+    # Una sesión caduca si no se renueva en estos días, y siempre al llegar al máximo
+    session_idle_days: int = field(default_factory=lambda: _int("SESSION_IDLE_DAYS", "7"))
+    session_max_days: int = field(default_factory=lambda: _int("SESSION_MAX_DAYS", "30"))
+    # Un administrador sin MFA solo puede configurarlo hasta activarlo
+    require_mfa_for_admins: bool = field(default_factory=lambda: _env("REQUIRE_MFA_FOR_ADMINS", "true") == "true")
+    # Intentos de contraseña fallidos (por persona y dirección) antes de bloquear un rato
+    login_max_failures: int = field(default_factory=lambda: _int("LOGIN_MAX_FAILURES", "5"))
+    login_lockout_seconds: int = field(default_factory=lambda: _int("LOGIN_LOCKOUT_SECONDS", "900"))
+    # La cookie de la sesión solo por HTTPS. "auto": sí en producción
+    auth_cookie_secure: str = field(default_factory=lambda: _env("AUTH_COOKIE_SECURE", "auto"))
+
     # --- Comprobaciones de salud: tiempo máximo por dependencia
     health_timeout_seconds: float = field(default_factory=lambda: _float("HEALTH_TIMEOUT_SECONDS", "2"))
 
@@ -82,6 +97,12 @@ class Settings:
     @property
     def is_production(self) -> bool:
         return self.env == "production"
+
+    @property
+    def cookie_secure(self) -> bool:
+        if self.auth_cookie_secure == "auto":
+            return self.is_production
+        return self.auth_cookie_secure == "true"
 
     @property
     def database_url(self) -> str:

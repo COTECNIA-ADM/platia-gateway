@@ -28,7 +28,7 @@ def test_clave_en_bearer_o_en_x_api_key():
 
 async def test_clave_con_otro_formato_no_toca_la_base():
     deps = SimpleNamespace(sessions=None)  # si se usara, fallaría
-    for raw in ("sk-ant-123", "plgw-usr-123"):
+    for raw in ("sk-ant-123", "plgw-otro-123", "x" * 200):
         with pytest.raises(AuthenticationFailed):
             await auth.resolve(deps, raw)
 
