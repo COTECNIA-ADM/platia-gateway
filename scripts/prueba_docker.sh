@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Prueba en Docker del contrato de inferencia (G3), del streaming (G4), de la reserva (G6),
 # de las cuotas (G7), de la seguridad de contenido (G8), de la auditoría (G9), de la
-# identidad de personas (G10), de la caché (G11) y de la telemetría (G12), repetible y sin coste.
+# identidad de personas (G10), de la caché (G11), de la telemetría (G12) y de la API del panel
+# (G13), repetible y sin coste.
 #
 # Requisito: la plataforma levantada (docker compose up -d --build --wait).
 # Uso:       bash scripts/prueba_docker.sh
@@ -429,5 +430,65 @@ exported="$(cli audit-export --org "$RUN" --user 42 --pseudonymize 2>/dev/null)"
 echo "ok: la persona 42 se encuentra por su huella tras seudonimizarla"
 cli audit-verify | grep -q "Cadena íntegra" || { echo "FALLO: seudonimizar ha roto la cadena"; exit 1; }
 echo "ok: seudonimizar no rompe la cadena"
+
+echo "== API del panel de administración (G13), a través de Nginx"
+ADMIN_EMAIL="eva@$RUN.test"
+cli create-user --org "$RUN" --email "$ADMIN_EMAIL" --name Eva --role admin
+printf '%s\n' "$PERSON_PASSWORD" | cli set-password --org "$RUN" --email "$ADMIN_EMAIL"
+admin_login="{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$PERSON_PASSWORD\"}"
+atoken="$(curl -s "$BASE/auth/login" -H 'content-type: application/json' -d "$admin_login" | gw_json '["access_token"]')"
+out="$(curl -s -w '\n%{http_code}' "$BASE/admin/overview" -H "Authorization: Bearer $atoken")"
+check "Panel sin MFA → 403" 403 "$out"
+asecret="$(curl -s -X POST "$BASE/auth/mfa/setup" -H "Authorization: Bearer $atoken" | gw_json '["secret"]')"
+atoken="$(curl -s "$BASE/auth/mfa/enable" -H "Authorization: Bearer $atoken" -H 'content-type: application/json' \
+  -d "{\"code\":\"$(totp_code "$asecret" 0)\"}" | gw_json '["access_token"]')"
+admin_api() { # método, ruta, [cuerpo]; deja el código en la última línea
+  curl -s -w '\n%{http_code}' -X "$1" "$BASE/admin/$2" -H "Authorization: Bearer $atoken" \
+    -H 'content-type: application/json' ${3:+-d "$3"}
+}
+out="$(admin_api GET 'overview?hours=1')"
+check "Resumen de la última hora" 200 "$out"
+requests="$(gw_json '["totals"]["requests"]' <<<"${out%$'\n'*}")"
+[ "$requests" -ge 1 ] || { echo "FALLO: el resumen no cuenta las peticiones de la prueba"; exit 1; }
+echo "ok: el resumen cuenta $requests peticiones de la organización"
+out="$(admin_api POST teams '{"slug":"panel","name":"Desde el panel"}')"
+check "Alta de un equipo" 201 "$out"
+team_id="$(gw_json '["id"]' <<<"${out%$'\n'*}")"
+out="$(admin_api POST teams '{"slug":"panel","name":"Repetido"}')"
+check "Equipo repetido → 409" 409 "$out"
+out="$(admin_api POST applications "{\"team_id\":$team_id,\"slug\":\"panel\",\"name\":\"Panel\",\"allowed_models\":[\"claude-$RUN\"]}")"
+check "Alta de una aplicación" 201 "$out"
+app_id="$(gw_json '["id"]' <<<"${out%$'\n'*}")"
+out="$(admin_api POST "applications/$app_id/keys" '{"label":"panel"}')"
+check "Clave nueva (se enseña una vez)" 201 "$out"
+panel_key="$(gw_json '["key"]' <<<"${out%$'\n'*}")"
+key_id="$(gw_json '["id"]' <<<"${out%$'\n'*}")"
+ask="{\"model\":\"claude-$RUN\",\"max_tokens\":20,\"messages\":[{\"role\":\"user\",\"content\":\"Hola\"}]}"
+out="$(curl -s -w '\n%{http_code}' "$BASE/v1/messages" -H "x-api-key: $panel_key" -H 'content-type: application/json' -d "$ask")"
+check "Llamada con la clave creada en el panel" 200 "$out"
+out="$(admin_api DELETE "keys/$key_id")"
+check "Revocar la clave" 204 "$out"
+out="$(curl -s -w '\n%{http_code}' "$BASE/v1/messages" -H "x-api-key: $panel_key" -H 'content-type: application/json' -d "$ask")"
+check "Clave revocada en el panel → 401" 401 "$out"
+out="$(admin_api POST models '{"model_key":"panel-x","display_name":"X","family":"anthropic"}')"
+check "El catálogo solo lo cambia quien opera el gateway → 403" 403 "$out"
+cli set-user --org "$RUN" --email "$ADMIN_EMAIL" --operator si
+ticket="$(curl -s "$BASE/auth/login" -H 'content-type: application/json' -d "$admin_login" | gw_json '["mfa_ticket"]')"
+atoken="$(curl -s "$BASE/auth/login/mfa" -H 'content-type: application/json' \
+  -d "{\"mfa_ticket\":\"$ticket\",\"code\":\"$(totp_code "$asecret" 1)\"}" | gw_json '["access_token"]')"
+catalog="$(admin_api GET catalog | sed '$d')"
+dep_id="$(docker compose exec -T gateway python -c "
+import json, sys
+c = json.load(sys.stdin)
+model = next(m['id'] for m in c['models'] if m['model_key'] == 'claude-$RUN')
+print(next(d['id'] for d in c['deployments'] if d['model_id'] == model))" <<<"$catalog")"
+out="$(admin_api PATCH "deployments/$dep_id" '{"weight":90}')"
+check "Operador: cambiar el peso de un despliegue" 200 "$out"
+actions="$(admin_api GET actions | sed '$d')"
+for action in team.create application.create key.create key.revoke; do
+  grep -q "\"$action\"" <<<"$actions" || { echo "FALLO: falta $action en el registro de cambios"; exit 1; }
+done
+! grep -q "$panel_key" <<<"$actions" || { echo "FALLO: la clave en claro está en el registro de cambios"; exit 1; }
+echo "ok: cada cambio queda en el registro, sin secretos"
 
 echo "== Prueba superada"

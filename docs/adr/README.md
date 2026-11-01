@@ -21,3 +21,4 @@ descartaron. Para cambiar una decisión se escribe un ADR nuevo que sustituya al
 | [014](ADR-014-identidad-de-personas.md) | Identidad de personas: contraseña, TOTP, sesiones en MySQL y claves personales | Aceptado |
 | [015](ADR-015-cache-exacta.md) | Caché exacta por aplicación y persona, cifrada en Redis; sin compresión de prompts | Aceptado |
 | [016](ADR-016-telemetria.md) | Telemetría con Prometheus, avisos por webhook firmado en cola de MySQL y eventos en tiempo real por WebSocket | Aceptado |
+| [017](ADR-017-api-del-panel.md) | API del panel: solo administradores con MFA y de su organización, catálogo para operadores y registro de cambios | Aceptado |

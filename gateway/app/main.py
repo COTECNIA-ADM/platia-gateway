@@ -15,6 +15,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from . import __version__, audit_chain, webhooks
+from .admin import router as admin_router
 from .account_api import auth_router, install_error_handlers, me_router
 from .api import router as api_router
 from .crypto import load_key
@@ -104,6 +105,7 @@ def create_app(settings: Settings | None = None, checks: dict[str, Check] | None
     app.include_router(api_router)
     app.include_router(auth_router)
     app.include_router(me_router)
+    app.include_router(admin_router)
     app.include_router(realtime_router)
     app.include_router(metrics_router)
     install_error_handlers(app)

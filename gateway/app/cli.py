@@ -227,7 +227,16 @@ def set_user(db: Session, args, settings: Settings) -> None:
         user.is_active = args.active == "si"
         if not user.is_active:
             _close_sessions(db, user, "admin")
-    _out(f"{user.email}: rol {user.role}, {'activa' if user.is_active else 'inactiva'}")
+    if args.operator is not None:
+        # Operar el gateway (catálogo común, webhooks globales; G13) solo se da desde aquí
+        if args.operator == "si" and user.role != UserRole.ADMIN:
+            raise CliError("Solo un administrador puede operar el gateway")
+        user.platform_operator = args.operator == "si"
+        _close_sessions(db, user, "admin")
+    if user.platform_operator and user.role != UserRole.ADMIN:
+        user.platform_operator = False
+    operator = ", opera el gateway" if user.platform_operator else ""
+    _out(f"{user.email}: rol {user.role}, {'activa' if user.is_active else 'inactiva'}{operator}")
 
 
 def set_cache(db: Session, args, settings: Settings) -> None:
@@ -801,6 +810,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--email", required=True)
     p.add_argument("--role", type=UserRole, choices=list(UserRole))
     p.add_argument("--active", choices=["si", "no"])
+    p.add_argument("--operator", choices=["si", "no"], help="Operar el gateway desde el panel (catálogo común)")
     p.set_defaults(handler=set_user)
 
     p = sub.add_parser("set-password", help="Poner o restablecer la contraseña de una persona")

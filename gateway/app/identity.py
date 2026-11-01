@@ -59,6 +59,7 @@ class Principal:
     email: str
     name: str
     mfa_enabled: bool
+    platform_operator: bool = False
 
 
 @dataclass(frozen=True)
@@ -343,7 +344,8 @@ async def authenticate(deps: Deps, token: str | None, *, allow_setup: bool = Fal
     if scope != SCOPE_FULL and not (allow_setup and scope == SCOPE_SETUP):
         raise PermissionDenied("Activa el MFA antes de continuar: es obligatorio para administradores")
     return Principal(user_id=user.id, organization_id=user.organization_id, session_id=session.id, scope=scope,
-                     role=user.role, email=user.email, name=user.name, mfa_enabled=user.mfa_enabled)
+                     role=user.role, email=user.email, name=user.name, mfa_enabled=user.mfa_enabled,
+                     platform_operator=user.platform_operator)
 
 
 # --- Cuenta
