@@ -28,7 +28,7 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
   `set-content-policy`, `content-policies`, `audit-seal`, `audit-verify`, `audit-export`,
   `audit-pseudonymize`, `create-user`, `set-user`, `set-password`, `reset-mfa`,
   `revoke-sessions`, `set-cache`, `cache-clear`, `revoke-key`, `create-webhook`, `webhooks`,
-  `set-webhook`, `webhook-test`, `latency`,
+  `set-webhook`, `webhook-test`, `latency`, `set-user --operator`,
   `show`, `usage`; `--exists-ok` para
   guiones que se repiten)
 - Prueba en Docker sin coste (con la plataforma levantada): `bash scripts/prueba_docker.sh`
@@ -84,6 +84,11 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
   `X-Platia-Signature: t=…,v1=…`. Un destino de webhook pasa por la comprobación SSRF de
   `app/webhooks.py` (https, dirección pública fijada, sin redirecciones). Ningún evento lleva
   texto de prompts o respuestas ni claves.
+- Panel (ADR-017): rutas en `app/admin/`, solo administradores con MFA y de su organización
+  (lo ajeno, 404); el catálogo común, webhooks globales y sellado, solo `platform_operator`,
+  que se da con la CLI. Cada cambio llama a `record(...)` antes de `commit` (misma
+  transacción) y los secretos se registran como `(cambiado)`. Un secreto se enseña una vez,
+  con `no-store`. Una ruta nueva va también en `docs/panel.md`.
 - Cada fase llega en un PR con tests, `ruff` y cobertura en verde, y una prueba en Docker
   que se pueda repetir.
 - No exponer MySQL ni Redis fuera de `data_net`. Nginx solo publica las rutas que tocan.

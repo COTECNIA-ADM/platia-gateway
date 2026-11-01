@@ -57,6 +57,11 @@ class NotFound(GatewayError):
     status, kind = 404, "not_found_error"
 
 
+class Conflict(GatewayError):
+    """El cambio choca con lo que ya existe (un nombre repetido, una regla de unicidad) (G13)."""
+    status, kind = 409, "invalid_request_error"
+
+
 class QuotaExceeded(GatewayError):
     """Cuota de un periodo (día o mes) agotada: no sirve reintentar hasta que se renueve (G7)."""
     status, kind = 402, "billing_error"

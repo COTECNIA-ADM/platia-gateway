@@ -150,6 +150,14 @@ cli latency --since 2026-11-01        # p50, p95 y p99 del tiempo propio (objeti
 Cómo comprobar la firma en el receptor, la lista de métricas y el WebSocket:
 [docs/telemetria.md](docs/telemetria.md) y [ADR-016](docs/adr/ADR-016-telemetria.md).
 
+## Panel de administración
+
+La API del panel (`/admin/*`) permite a un administrador con MFA gestionar su organización:
+aplicaciones y claves, personas, cuotas, reglas de contenido, webhooks, auditoría y un
+resumen de uso. El catálogo de proveedores y modelos lo cambia solo quien opera el gateway
+(`cli set-user --operator si`). Cada cambio queda registrado. Rutas en
+[docs/panel.md](docs/panel.md) y decisiones en [ADR-017](docs/adr/ADR-017-api-del-panel.md).
+
 ## Personas y claves personales
 
 Las personas entran con contraseña y una app autenticadora (TOTP) en `/auth/login`; el panel

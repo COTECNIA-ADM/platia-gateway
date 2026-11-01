@@ -51,6 +51,8 @@ flowchart LR
 | `GET /v1/models` | OpenAI | Saber qué modelos puede usar una clave | G3 |
 | `GET /health` | Propio | Nginx y monitorización | G0 |
 | `/auth/*` y `/me/*` | Propio (JSON) | Personas: sesión, MFA y claves personales; el panel y el portal | G10 |
+| `/events/stream` | WebSocket | Eventos en tiempo real para el panel | G12 |
+| `/admin/*` | Propio (JSON) | Panel de administración (ver `docs/panel.md`) | G13 |
 
 Los dos contratos convergen en el mismo pipeline: la diferencia está solo en cómo se lee la
 entrada y cómo se da forma a la salida. Cuando la petición y el proveedor son de la misma
@@ -242,6 +244,9 @@ erDiagram
 | `audit_logs` | Una fila por petición: quién, qué, resultado, tokens, coste, hashes | G3, G9 |
 | `audit_chain_state` | Último eslabón sellado de la cadena de la auditoría | G9 |
 | `webhooks`, `webhook_deliveries` | Destinos de los avisos (secreto cifrado, eventos, estado) y cola de entregas con sus reintentos | G12 |
+| `admin_actions` | Registro de cambios del panel: quién, qué, sobre qué objeto, campos (sin secretos), IP | G13 |
+
+`users.platform_operator` marca a quien opera el gateway: cambia el catálogo común desde el panel (G13).
 
 `audit_logs` no tiene claves foráneas, para sobrevivir a cambios en la configuración.
 

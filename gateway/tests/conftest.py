@@ -45,7 +45,7 @@ def alembic_config(connection) -> Config:
 
 KEY_B64 = base64.urlsafe_b64encode(b"k" * 32).decode()
 JWT_SECRET = "s" * 48
-TABLES = ["webhook_deliveries", "webhooks", "user_sessions", "audit_chain_state", "content_policies", "usage_limits", "audit_logs", "api_keys", "model_prices", "deployments", "llm_models", "providers", "applications",
+TABLES = ["admin_actions", "webhook_deliveries", "webhooks", "user_sessions", "audit_chain_state", "content_policies", "usage_limits", "audit_logs", "api_keys", "model_prices", "deployments", "llm_models", "providers", "applications",
           "users", "teams", "organizations"]
 
 ANTHROPIC_REPLY = {"id": "msg_up", "type": "message", "role": "assistant", "model": "claude-upstream",

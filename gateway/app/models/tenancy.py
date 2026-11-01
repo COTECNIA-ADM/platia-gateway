@@ -62,6 +62,9 @@ class User(TimestampMixin, SoftDeleteMixin, Base):
                                                 native_enum=False, length=16),
                                            default=UserRole.MEMBER, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Opera el gateway (G13): catálogo de proveedores, modelos, despliegues y precios, que es
+    # común a todas las organizaciones, y los webhooks globales. Solo se da desde la CLI
+    platform_operator: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
     # scrypt (app/passwords.py). NULL: no puede iniciar sesión con contraseña
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     password_changed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -69,3 +69,8 @@ async def record_success(redis, deployment_id: int) -> None:
         await redis.delete(_FAILURES.format(deployment_id))
     except (RedisError, OSError) as exc:
         log.warning("cooldown.unavailable", error_type=type(exc).__name__)
+
+
+async def clear(redis, deployment_id: int) -> None:
+    """Quita el enfriamiento y la cuenta de fallos (panel, G13)."""
+    await redis.delete(_COOLED.format(deployment_id), _FAILURES.format(deployment_id))

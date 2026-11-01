@@ -311,6 +311,13 @@ def test_personas_por_cli(settings, capsys, monkeypatch, client, engine):
     assert code == 0 and "claves personales revocadas 1" in out
     assert client.post("/v1/messages", headers={"x-api-key": raw}, json=ask).status_code == 401
 
+    # Operar el gateway (G13) solo se da a administradores
+    code, _, err = _run(settings, capsys, "set-user", "--org", "cotecnia", "--email", "eva@cotecnia.es",
+                        "--role", "member", "--operator", "si")
+    assert code != 0 and "Solo un administrador" in err
+    code, out, _ = _run(settings, capsys, "set-user", "--org", "cotecnia", "--email", "eva@cotecnia.es",
+                        "--role", "admin", "--operator", "si")
+    assert code == 0 and "opera el gateway" in out
     code, out, _ = _run(settings, capsys, "set-user", "--org", "cotecnia", "--email", "eva@cotecnia.es",
                         "--role", "member", "--active", "no")
     assert code == 0 and "rol member, inactiva" in out

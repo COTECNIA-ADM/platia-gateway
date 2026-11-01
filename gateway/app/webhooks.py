@@ -103,6 +103,12 @@ def check_url(url: str, private_hosts: frozenset[str]) -> tuple[str, str, int]:
         raise WebhookUrlError("Solo URLs https (http solo para los receptores de WEBHOOK_PRIVATE_HOSTS)")
     if len(url) > 2048:
         raise WebhookUrlError("URL demasiado larga")
+    try:
+        literal = not _public(host) and host not in private_hosts
+    except ValueError:
+        literal = False  # un nombre: la dirección se comprueba al resolverlo, en cada envío
+    if literal:
+        raise WebhookUrlError("Es una dirección interna (si es un receptor propio, añádela a WEBHOOK_PRIVATE_HOSTS)")
     return parts.scheme, host, port or (443 if parts.scheme == "https" else 80)
 
 
