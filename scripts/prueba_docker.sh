@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Prueba en Docker del contrato de inferencia (G3), del streaming (G4), de la reserva (G6),
-# de las cuotas (G7) y de la seguridad de contenido (G8), repetible y sin coste.
+# de las cuotas (G7), de la seguridad de contenido (G8), de la auditoría (G9) y de la
+# identidad de personas (G10), repetible y sin coste.
 #
 # Requisito: la plataforma levantada (docker compose up -d --build --wait).
 # Uso:       bash scripts/prueba_docker.sh
@@ -242,6 +243,61 @@ docker compose up -d --wait redis >/dev/null 2>&1
 echo "ok: con límites y sin Redis → 503"
 [ "$code_luis" = 200 ] || { echo "FALLO: sin límites y sin Redis se esperaba 200 (recibido $code_luis)"; exit 1; }
 echo "ok: sin límites no hace falta Redis → 200"
+echo "== Personas: contraseña, MFA, sesiones y claves personales (G10)"
+gw_json() { docker compose exec -T gateway python -c "import json, sys; print(json.load(sys.stdin)$1)"; }
+totp_code() { docker compose exec -T gateway python -c "from app import totp; print(totp.code_at('$1', totp.current_step() + $2))"; }
+PERSON="ana@$RUN.test"
+PERSON_PASSWORD="Contraseña de prueba $RUN"
+JAR="$(mktemp)"
+trap 'cleanup; rm -f "$JAR"' EXIT
+cli create-app --org "$RUN" --team equipo --slug herramientas --name Herramientas --personal-keys \
+  --model "claude-$RUN"
+cli create-user --org "$RUN" --email "$PERSON" --name Ana --role admin
+printf '%s\n' "$PERSON_PASSWORD" | cli set-password --org "$RUN" --email "$PERSON"
+login_body="{\"email\":\"$PERSON\",\"password\":\"$PERSON_PASSWORD\"}"
+out="$(curl -s -w '\n%{http_code}' "$BASE/auth/login" -H 'content-type: application/json' \
+  -d "{\"email\":\"$PERSON\",\"password\":\"no es la buena\"}")"
+check "Contraseña incorrecta → 401" 401 "$out"
+login="$(curl -s -c "$JAR" "$BASE/auth/login" -H 'content-type: application/json' -d "$login_body")"
+[ "$(gw_json '["scope"]' <<<"$login")" = mfa_setup ] || { echo "FALLO: un administrador sin MFA debía entrar solo para configurarlo"; exit 1; }
+token="$(gw_json '["access_token"]' <<<"$login")"
+out="$(curl -s -w '\n%{http_code}' "$BASE/me/keys" -H "Authorization: Bearer $token")"
+check "Administrador sin MFA no puede crear claves → 403" 403 "$out"
+secret="$(curl -s -X POST "$BASE/auth/mfa/setup" -H "Authorization: Bearer $token" | gw_json '["secret"]')"
+enabled="$(curl -s "$BASE/auth/mfa/enable" -H "Authorization: Bearer $token" -H 'content-type: application/json' \
+  -d "{\"code\":\"$(totp_code "$secret" 0)\"}")"
+token="$(gw_json '["access_token"]' <<<"$enabled")"
+created="$(curl -s "$BASE/me/keys" -H "Authorization: Bearer $token" -H 'content-type: application/json' \
+  -d '{"label":"Claude Code","expires_days":30}')"
+personal_key="$(gw_json '["key"]' <<<"$created")"
+echo "ok: MFA activado y clave personal ${personal_key:0:17}… creada"
+out="$(curl -s -w '\n%{http_code}' "$BASE/v1/messages" -H "x-api-key: $personal_key" -H 'content-type: application/json' \
+  -d "{\"model\":\"claude-$RUN\",\"max_tokens\":20,\"messages\":[{\"role\":\"user\",\"content\":\"Hola\"}]}")"
+check "Llamada con la clave personal" 200 "$out"
+out="$(curl -s -w '\n%{http_code}' "$BASE/v1/messages" -H "x-api-key: $personal_key" -H 'X-Platia-User-Id: 7' \
+  -H 'content-type: application/json' \
+  -d "{\"model\":\"claude-$RUN\",\"max_tokens\":20,\"messages\":[{\"role\":\"user\",\"content\":\"Hola\"}]}")"
+check "Una clave personal no declara otra persona → 400" 400 "$out"
+first="$(curl -s "$BASE/auth/login" -H 'content-type: application/json' -d "$login_body")"
+ticket="$(gw_json '["mfa_ticket"]' <<<"$first")"
+out="$(curl -s -w '\n%{http_code}' -c "$JAR" "$BASE/auth/login/mfa" -H 'content-type: application/json' \
+  -d "{\"mfa_ticket\":\"$ticket\",\"code\":\"$(totp_code "$secret" 1)\"}")"
+check "Inicio de sesión con contraseña y código" 200 "$out"
+old_cookie="$(grep platia_gw_refresh "$JAR" | awk '{print $7}')"
+out="$(curl -s -w '\n%{http_code}' -b "$JAR" -c "$JAR" -X POST "$BASE/auth/refresh" -H 'X-Requested-With: prueba')"
+check "Renovación con la cookie" 200 "$out"
+out="$(curl -s -w '\n%{http_code}' -X POST "$BASE/auth/refresh" -H 'X-Requested-With: prueba' \
+  -H "Cookie: platia_gw_refresh=$old_cookie")"
+check "Renovación ya usada → 401 (la sesión se cierra)" 401 "$out"
+out="$(curl -s -w '\n%{http_code}' -b "$JAR" -X POST "$BASE/auth/refresh" -H 'X-Requested-With: prueba')"
+check "La sesión copiada ya no se renueva" 401 "$out"
+cli revoke-sessions --org "$RUN" --email "$PERSON" --keys
+out="$(curl -s -w '\n%{http_code}' "$BASE/auth/me" -H "Authorization: Bearer $token")"
+check "Sesiones cerradas desde la CLI → 401" 401 "$out"
+out="$(curl -s -w '\n%{http_code}' "$BASE/v1/messages" -H "x-api-key: $personal_key" -H 'content-type: application/json' \
+  -d "{\"model\":\"claude-$RUN\",\"max_tokens\":20,\"messages\":[{\"role\":\"user\",\"content\":\"Hola\"}]}")"
+check "Clave personal revocada → 401" 401 "$out"
+
 echo "== Auditoría verificable (cadena, disparadores y RGPD)"
 cli audit-seal
 out="$(cli audit-verify)"; echo "$out"

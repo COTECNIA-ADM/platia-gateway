@@ -2,7 +2,7 @@
 
 Al arrancar crea las conexiones (MySQL, Redis y el cliente HTTP hacia los proveedores) y
 carga la clave de cifrado. Las rutas de inferencia están en `api.py` y el pipeline en
-`pipeline/`.
+`pipeline/`; las de sesión y cuenta de las personas, en `account_api.py`.
 """
 import asyncio
 from contextlib import asynccontextmanager, suppress
@@ -15,6 +15,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from . import __version__, audit_chain
+from .account_api import auth_router, install_error_handlers, me_router
 from .api import router as api_router
 from .crypto import load_key
 from .errors import InternalError, contract_for, error_response
@@ -86,6 +87,9 @@ def create_app(settings: Settings | None = None, checks: dict[str, Check] | None
     app.state.settings = settings
     app.include_router(health_router)
     app.include_router(api_router)
+    app.include_router(auth_router)
+    app.include_router(me_router)
+    install_error_handlers(app)
 
     @app.exception_handler(Exception)
     async def unexpected(request: Request, exc: Exception):

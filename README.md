@@ -118,6 +118,27 @@ cli audit-pseudonymize --org cotecnia --user 7     # seudonimizarla sin romper l
 
 Detalles en [ADR-013](docs/adr/ADR-013-auditoria-verificable.md).
 
+## Personas y claves personales
+
+Las personas entran con contraseña y una app autenticadora (TOTP) en `/auth/login`; el panel
+y el portal llegan en G13 y G14. Un administrador tiene que activar el MFA antes de hacer
+nada más. Las claves personales (`plgw-usr-…`, para Claude Code o scripts) siguen las reglas
+de la aplicación marcada con `--personal-keys`.
+
+```bash
+cli create-app --org cotecnia --team plataforma --slug herramientas --name "Herramientas" \
+    --personal-keys --model claude-sonnet
+cli create-user --org cotecnia --email ana@cotecnia.es --name "Ana" --role admin
+cli set-password --org cotecnia --email ana@cotecnia.es   # la pide sin mostrarla
+cli create-key --org cotecnia --user ana@cotecnia.es --label "Claude Code"
+cli reset-mfa --org cotecnia --email ana@cotecnia.es       # si pierde el móvil
+cli revoke-sessions --org cotecnia --email ana@cotecnia.es --keys
+```
+
+En PowerShell, con `gwcli` (que usa `-T`), la contraseña se pasa por la entrada:
+`"la contraseña" | gwcli set-password --org cotecnia --email ana@cotecnia.es`. Detalles en
+[ADR-014](docs/adr/ADR-014-identidad-de-personas.md).
+
 ## Conexión con PLATIA
 
 `bash scripts/alta_platia.sh` (con `ANTHROPIC_API_KEY` exportada) da de alta PLATIA con sus

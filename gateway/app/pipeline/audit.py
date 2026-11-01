@@ -46,6 +46,7 @@ def _who(ctx: PipelineContext) -> dict:
         "request_id": ctx.request_id, "contract": ctx.contract, "stream": ctx.stream,
         "organization_id": identity.organization_id, "team_id": identity.team_id,
         "application_id": identity.application_id, "api_key_prefix": identity.api_key_prefix,
+        "user_id": identity.user_id,
         "end_user_ref": ctx.end_user_ref, "purpose": ctx.purpose,
         # Huellas con la sal de la organización (G9): sin el texto ni el valor
         "end_user_digest": keyed_digest(identity.audit_salt, ctx.end_user_ref) if ctx.end_user_ref else None,

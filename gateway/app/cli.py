@@ -4,7 +4,8 @@ Uso dentro de Docker (el contenedor de migraciones tiene acceso a MySQL):
 
     docker compose run --rm migrations python -m app.cli <orden> [opciones]
 
-Órdenes: create-org, create-team, create-app, create-key, revoke-key, create-provider,
+Órdenes: create-org, create-team, create-app, create-key, revoke-key, create-user, set-user,
+set-password, reset-mfa y revoke-sessions (personas, G10), create-provider,
 create-model, set-fallbacks (cadena de reserva), create-deployment, set-deployment
 (prioridad, peso o estado), set-price, set-limit, remove-limit y limits (cuotas y límites de
 ritmo, G7), set-content-policy y content-policies (seguridad de contenido, G8),
@@ -12,8 +13,9 @@ audit-seal, audit-verify, audit-export y audit-pseudonymize (auditoría verifica
 G9), show y usage (consumo y coste, para compararlo con lo que registra PLATIA).
 `python -m app.cli <orden> -h` explica cada una.
 
-La clave de un proveedor nunca va como argumento (quedaría en el historial de la shell):
-se lee de una variable de entorno (`--api-key-env`) o de la entrada estándar. La clave de
+La clave de un proveedor y la contraseña de una persona nunca van como argumento (quedarían
+en el historial de la shell): se leen de una variable de entorno (`--api-key-env`,
+`--password-env`) o de la entrada estándar. La clave de
 una aplicación se enseña una sola vez, al crearla.
 """
 import argparse
@@ -32,14 +34,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .crypto import encrypt, load_key
-from .keys import new_application_key
+from .keys import new_application_key, new_user_key
+from . import passwords
 from . import audit_chain
 from .content_policy import ALLOWED, DEFAULTS
 from .limits import window
 from .models import (ApiKey, Application, ApplicationStatus, AuditLog, AuditStatus, ContentAction, ContentCheck,
                      ContentPolicy, Deployment, Direction, KeyKind, PolicyScope,
                      LimitMetric, LimitPeriod, LimitScope, LlmModel, ModelFamily, ModelPrice, Organization, Provider,
-                     ProviderKind, Team, UsageLimit)
+                     ProviderKind, Team, UsageLimit, User, UserRole, UserSession)
 from .models.base import utcnow
 from .settings import Settings
 
@@ -74,14 +77,14 @@ def _decimal(value: str) -> Decimal:
     return number
 
 
-def _read_secret(env_name: str | None) -> str:
+def _read_secret(env_name: str | None, prompt: str = "Clave API del proveedor") -> str:
     if env_name:
         value = os.environ.get(env_name, "")
         if not value:
             raise CliError(f"La variable de entorno {env_name} está vacía")
         return value.strip()
     if sys.stdin.isatty():
-        return getpass.getpass("Clave API del proveedor (no se muestra): ").strip()
+        return getpass.getpass(f"{prompt} (no se muestra): ").strip()
     return sys.stdin.readline().strip()
 
 
@@ -106,16 +109,36 @@ def create_team(db: Session, args, settings: Settings) -> None:
 def create_app(db: Session, args, settings: Settings) -> None:
     org = _org(db, args.org)
     team = _one(db, Team, organization_id=org.id, slug=args.team, deleted_at=None)
+    if args.personal_keys and args.trusted:
+        raise CliError("La aplicación de las claves personales no puede ser de confianza")
+    if args.personal_keys and db.execute(select(Application.id).where(
+            Application.organization_id == org.id, Application.personal_keys.is_(True),
+            Application.deleted_at.is_(None))).first():
+        raise CliError(f"'{org.slug}' ya tiene una aplicación para las claves personales")
     app = Application(organization_id=org.id, team_id=team.id, slug=args.slug, name=args.name,
                       trusted=args.trusted, allowed_purposes=args.purpose or [],
-                      allowed_models=args.model or None)
+                      allowed_models=args.model or None, personal_keys=args.personal_keys)
     db.add(app)
     db.flush()
-    _out(f"Aplicación '{app.slug}' creada (id {app.id}, de confianza: {'sí' if app.trusted else 'no'})")
+    extra = ", para claves personales" if app.personal_keys else ""
+    _out(f"Aplicación '{app.slug}' creada (id {app.id}, de confianza: {'sí' if app.trusted else 'no'}{extra})")
 
 
 def create_key(db: Session, args, settings: Settings) -> None:
     org = _org(db, args.org)
+    if bool(args.app) == bool(args.user):
+        raise CliError("Indica --app (clave de aplicación) o --user (clave personal), uno de los dos")
+    if args.user:
+        user = _user(db, org, args.user)
+        new = new_user_key()
+        days = args.expires_days or 90
+        db.add(ApiKey(organization_id=org.id, kind=KeyKind.USER, user_id=user.id, prefix=new.prefix,
+                      key_hash=new.key_hash, label=args.label, expires_at=utcnow() + timedelta(days=days)))
+        db.flush()
+        _out(f"Clave personal creada para {user.email} (prefijo {new.prefix}, caduca en {days} días). "
+             "Guárdala ahora: no se volverá a mostrar.")
+        _out(new.raw)
+        return
     app = _one(db, Application, organization_id=org.id, slug=args.app, deleted_at=None)
     if app.status != ApplicationStatus.ACTIVE:
         raise CliError(f"La aplicación '{app.slug}' no está activa")
@@ -134,6 +157,69 @@ def revoke_key(db: Session, args, settings: Settings) -> None:
         raise CliError(f"El prefijo {args.prefix} corresponde a {len(keys)} claves activas; hace falta exactamente 1")
     keys[0].revoked_at = utcnow()
     _out(f"Clave {args.prefix} revocada")
+
+
+def _user(db: Session, org: Organization, email: str) -> User:
+    return _one(db, User, organization_id=org.id, email=email.strip().lower(), deleted_at=None)
+
+
+def create_user(db: Session, args, settings: Settings) -> None:
+    org = _org(db, args.org)
+    team = _one(db, Team, organization_id=org.id, slug=args.team, deleted_at=None) if args.team else None
+    user = User(organization_id=org.id, team_id=team.id if team else None, email=args.email.strip().lower(),
+                name=args.name, role=args.role)
+    db.add(user)
+    db.flush()
+    _out(f"Persona {user.email} creada en '{org.slug}' (id {user.id}, rol {user.role}). "
+         "Ponle contraseña con set-password.")
+
+
+def set_password(db: Session, args, settings: Settings) -> None:
+    """Contraseña inicial o restablecida. Cierra todas las sesiones abiertas de la persona."""
+    user = _user(db, _org(db, args.org), args.email)
+    password = _read_secret(args.password_env, "Contraseña nueva")
+    try:
+        passwords.check_policy(password, email=user.email)
+    except passwords.WeakPassword as exc:
+        raise CliError(str(exc)) from exc
+    user.password_hash, user.password_changed_at = passwords.hash_password(password), utcnow()
+    closed = _close_sessions(db, user, "password_changed")
+    _out(f"Contraseña de {user.email} cambiada; sesiones cerradas: {closed}")
+
+
+def reset_mfa(db: Session, args, settings: Settings) -> None:
+    """Para quien ha perdido el móvil: quita el MFA y cierra sus sesiones. Si es
+    administrador, tendrá que configurarlo de nuevo al entrar."""
+    user = _user(db, _org(db, args.org), args.email)
+    user.mfa_enabled, user.mfa_secret_encrypted, user.mfa_last_step = False, None, None
+    closed = _close_sessions(db, user, "mfa_changed")
+    _out(f"MFA de {user.email} quitado; sesiones cerradas: {closed}")
+
+
+def _close_sessions(db: Session, user: User, reason: str) -> int:
+    return db.execute(update(UserSession).where(UserSession.user_id == user.id, UserSession.revoked_at.is_(None))
+                      .values(revoked_at=utcnow(), revoked_reason=reason)).rowcount
+
+
+def revoke_sessions(db: Session, args, settings: Settings) -> None:
+    user = _user(db, _org(db, args.org), args.email)
+    closed = _close_sessions(db, user, "admin")
+    keys = 0
+    if args.keys:
+        keys = db.execute(update(ApiKey).where(ApiKey.user_id == user.id, ApiKey.revoked_at.is_(None))
+                          .values(revoked_at=utcnow())).rowcount
+    _out(f"{user.email}: sesiones cerradas {closed}, claves personales revocadas {keys}")
+
+
+def set_user(db: Session, args, settings: Settings) -> None:
+    user = _user(db, _org(db, args.org), args.email)
+    if args.role:
+        user.role = args.role
+    if args.active is not None:
+        user.is_active = args.active == "si"
+        if not user.is_active:
+            _close_sessions(db, user, "admin")
+    _out(f"{user.email}: rol {user.role}, {'activa' if user.is_active else 'inactiva'}")
 
 
 def create_provider(db: Session, args, settings: Settings) -> None:
@@ -514,11 +600,46 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--trusted", action="store_true", help="Puede declarar la persona final (X-Platia-User-Id)")
     p.add_argument("--purpose", action="append", help="Propósito permitido (repetible); 'default' siempre lo está y '*' permite cualquiera")
     p.add_argument("--model", action="append", help="Modelo permitido (repetible); sin él, todos")
+    p.add_argument("--personal-keys", action="store_true",
+                   help="Sus reglas se aplican a las claves personales de la organización (una por organización)")
     p.set_defaults(handler=create_app)
 
-    p = sub.add_parser("create-key", help="Crear una clave para una aplicación (se muestra una vez)")
+    p = sub.add_parser("create-user", help="Dar de alta a una persona (G10)")
     p.add_argument("--org", required=True)
-    p.add_argument("--app", required=True)
+    p.add_argument("--email", required=True)
+    p.add_argument("--name", required=True)
+    p.add_argument("--team", help="Equipo (cuotas por equipo)")
+    p.add_argument("--role", type=UserRole, choices=list(UserRole), default=UserRole.MEMBER)
+    p.set_defaults(handler=create_user)
+
+    p = sub.add_parser("set-user", help="Cambiar el rol de una persona o darla de baja")
+    p.add_argument("--org", required=True)
+    p.add_argument("--email", required=True)
+    p.add_argument("--role", type=UserRole, choices=list(UserRole))
+    p.add_argument("--active", choices=["si", "no"])
+    p.set_defaults(handler=set_user)
+
+    p = sub.add_parser("set-password", help="Poner o restablecer la contraseña de una persona")
+    p.add_argument("--org", required=True)
+    p.add_argument("--email", required=True)
+    p.add_argument("--password-env", help="Variable de entorno con la contraseña (si no, se lee de la entrada)")
+    p.set_defaults(handler=set_password)
+
+    p = sub.add_parser("reset-mfa", help="Quitar el MFA a quien ha perdido el móvil")
+    p.add_argument("--org", required=True)
+    p.add_argument("--email", required=True)
+    p.set_defaults(handler=reset_mfa)
+
+    p = sub.add_parser("revoke-sessions", help="Cerrar todas las sesiones de una persona")
+    p.add_argument("--org", required=True)
+    p.add_argument("--email", required=True)
+    p.add_argument("--keys", action="store_true", help="Revocar también sus claves personales")
+    p.set_defaults(handler=revoke_sessions)
+
+    p = sub.add_parser("create-key", help="Crear una clave de aplicación o personal (se muestra una vez)")
+    p.add_argument("--org", required=True)
+    p.add_argument("--app", help="Aplicación dueña de la clave")
+    p.add_argument("--user", help="Correo de la persona dueña de una clave personal (G10)")
     p.add_argument("--label", default="")
     p.add_argument("--expires-days", type=int, help="Caducidad, para rotar sin cortes")
     p.set_defaults(handler=create_key)

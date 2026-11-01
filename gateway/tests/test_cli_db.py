@@ -264,3 +264,70 @@ def test_politica_de_contenido_por_cli(settings, capsys, client, world):
     code, _, err = run("set-content-policy", "--org", "cotecnia", "--direction", "output", "--check",
                        "classified", "--action", "log")
     assert code == 1 and "En la salida no se comprueba" in err
+
+
+def test_personas_por_cli(settings, capsys, monkeypatch, client, engine):
+    """Alta de una persona, contraseña, clave personal y bajas (G10)."""
+    from app.models import User, UserSession
+
+    code, out, _ = _run(settings, capsys, "create-app", "--org", "cotecnia", "--team", "plataforma", "--slug",
+                        "herramientas", "--name", "Herramientas", "--personal-keys")
+    assert code == 0 and "para claves personales" in out
+    code, _, err = _run(settings, capsys, "create-app", "--org", "cotecnia", "--team", "plataforma", "--slug",
+                        "otra-mas", "--name", "Otra", "--personal-keys")
+    assert code == 1 and "ya tiene una aplicación" in err
+    code, _, err = _run(settings, capsys, "create-app", "--org", "cotecnia", "--team", "plataforma", "--slug",
+                        "confiada", "--name", "C", "--personal-keys", "--trusted")
+    assert code == 1 and "no puede ser de confianza" in err
+
+    code, out, _ = _run(settings, capsys, "create-user", "--org", "cotecnia", "--email", "Eva@Cotecnia.es",
+                        "--name", "Eva", "--team", "plataforma", "--role", "admin")
+    assert code == 0 and "eva@cotecnia.es" in out and "rol admin" in out
+    monkeypatch.setenv("CLAVE_EVA", "corta")
+    code, _, err = _run(settings, capsys, "set-password", "--org", "cotecnia", "--email", "eva@cotecnia.es",
+                        "--password-env", "CLAVE_EVA")
+    assert code == 1 and "12 caracteres" in err
+    monkeypatch.setenv("CLAVE_EVA", "Una contraseña para Eva")
+    code, out, _ = _run(settings, capsys, "set-password", "--org", "cotecnia", "--email", "eva@cotecnia.es",
+                        "--password-env", "CLAVE_EVA")
+    assert code == 0 and "sesiones cerradas: 0" in out
+
+    login = client.post("/auth/login", json={"email": "eva@cotecnia.es", "password": "Una contraseña para Eva"})
+    assert login.json()["scope"] == "mfa_setup"  # administradora sin MFA
+
+    code, out, _ = _run(settings, capsys, "create-key", "--org", "cotecnia", "--user", "eva@cotecnia.es",
+                        "--label", "scripts", "--expires-days", "10")
+    raw = out.strip().splitlines()[-1]
+    assert code == 0 and raw.startswith("plgw-usr-") and "caduca en 10 días" in out
+    ask = {"model": "claude-test", "max_tokens": 5, "messages": [{"role": "user", "content": "Hola"}]}
+    assert client.post("/v1/messages", headers={"x-api-key": raw}, json=ask).status_code == 200
+    code, _, err = _run(settings, capsys, "create-key", "--org", "cotecnia")
+    assert code == 1 and "--app" in err
+
+    code, out, _ = _run(settings, capsys, "reset-mfa", "--org", "cotecnia", "--email", "eva@cotecnia.es")
+    assert code == 0 and "sesiones cerradas: 1" in out
+    code, out, _ = _run(settings, capsys, "revoke-sessions", "--org", "cotecnia", "--email", "eva@cotecnia.es",
+                        "--keys")
+    assert code == 0 and "claves personales revocadas 1" in out
+    assert client.post("/v1/messages", headers={"x-api-key": raw}, json=ask).status_code == 401
+
+    code, out, _ = _run(settings, capsys, "set-user", "--org", "cotecnia", "--email", "eva@cotecnia.es",
+                        "--role", "member", "--active", "no")
+    assert code == 0 and "rol member, inactiva" in out
+    with Session(engine) as db:
+        eva = db.execute(select(User).where(User.email == "eva@cotecnia.es")).scalar()
+        assert eva.password_hash.startswith("scrypt$") and not eva.is_active
+        assert db.execute(select(UserSession.revoked_reason)).scalars().all() == ["mfa_changed"]
+    code, _, err = _run(settings, capsys, "set-password", "--org", "cotecnia", "--email", "nadie@cotecnia.es",
+                        "--password-env", "CLAVE_EVA")
+    assert code == 1 and "No existe" in err
+
+
+def test_contrasena_por_la_entrada(settings, capsys, monkeypatch, client):
+    import io
+    _run(settings, capsys, "create-user", "--org", "cotecnia", "--email", "leo@cotecnia.es", "--name", "Leo")
+    monkeypatch.setattr("sys.stdin", io.StringIO("Contraseña de Leo por la entrada\n"))
+    code, _, _ = _run(settings, capsys, "set-password", "--org", "cotecnia", "--email", "leo@cotecnia.es")
+    assert code == 0
+    login = client.post("/auth/login", json={"email": "leo@cotecnia.es", "password": "Contraseña de Leo por la entrada"})
+    assert login.status_code == 200

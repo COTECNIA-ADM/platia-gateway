@@ -51,3 +51,10 @@ def new_application_key(slug: str) -> NewKey:
     head = f"{APP_PREFIX}{clean}-"
     raw = head + secrets.token_hex(24)
     return NewKey(raw=raw, prefix=raw[:len(head) + _VISIBLE_SECRET], key_hash=hash_key(raw))
+
+
+def new_user_key() -> NewKey:
+    """Clave personal (G10): ``plgw-usr-<secreto>``. No lleva el nombre de la persona: el
+    prefijo visible identifica la clave sin decir de quién es a quien vea un log."""
+    raw = USER_PREFIX + secrets.token_hex(24)
+    return NewKey(raw=raw, prefix=raw[:len(USER_PREFIX) + _VISIBLE_SECRET], key_hash=hash_key(raw))
