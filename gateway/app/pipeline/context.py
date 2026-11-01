@@ -39,6 +39,8 @@ class Identity:
     allowed_purposes: tuple[str, ...]
     allowed_models: tuple[str, ...] | None
     allowed_providers: tuple[str, ...] | None
+    # Sal de la organización para las huellas de la auditoría (G9); nunca sale del gateway
+    audit_salt: str = field(default="", repr=False)
 
 
 @dataclass(frozen=True)

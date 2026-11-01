@@ -56,8 +56,11 @@ class AuditLog(Base):
     team_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     application_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Persona final declarada por una aplicación de confianza (X-Platia-User-Id)
+    # Persona final declarada por una aplicación de confianza (X-Platia-User-Id). Se puede
+    # seudonimizar (RGPD) incluso en filas selladas: la cadena cubre su huella, no el valor
     end_user_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # HMAC-SHA256 de end_user_ref con la sal de la organización (G9)
+    end_user_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
     api_key_prefix: Mapped[str | None] = mapped_column(String(48), nullable=True)
     purpose: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
@@ -89,3 +92,17 @@ class AuditLog(Base):
     security_flags: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # Cadena de integridad (G9)
     chain_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class AuditChainState(Base):
+    """Último eslabón sellado de la cadena de la auditoría (G9). Una sola fila (id 1).
+
+    Sirve para sellar por orden sin recorrer la tabla y, al verificar, para detectar que
+    se han borrado filas del final. No es la prueba: la prueba son los propios hashes.
+    """
+    __tablename__ = "audit_chain_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    last_id: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    last_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(_PRECISE, default=utcnow, onupdate=utcnow, nullable=False)

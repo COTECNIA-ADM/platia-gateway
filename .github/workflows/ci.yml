@@ -35,6 +35,12 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements-dev.txt
+      # Los servicios de GitHub no admiten argumentos de arranque: la opción que deja crear los
+      # disparadores de la auditoría (ADR-013) se activa con root antes de los tests
+      - name: Permitir disparadores sin SUPER en MySQL
+        run: >-
+          python -c "import pymysql; c = pymysql.connect(host='127.0.0.1', user='root', password='ci-root');
+          c.cursor().execute('SET GLOBAL log_bin_trust_function_creators = 1')"
       # Revisión de estilo con la configuración común de ruff.toml
       - run: ruff check .
       # Cobertura medida en cada PR; falla si baja del mínimo

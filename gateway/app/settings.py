@@ -65,6 +65,13 @@ class Settings:
     cooldown_seconds: int = field(default_factory=lambda: _int("COOLDOWN_SECONDS", "60"))
     cooldown_max_seconds: int = field(default_factory=lambda: _int("COOLDOWN_MAX_SECONDS", "300"))
 
+    # --- Auditoría encadenada (G9, ADR-013)
+    # Cada cuánto sella el gateway las filas cerradas (0 = no sella; queda cli audit-seal)
+    audit_seal_interval_seconds: float = field(default_factory=lambda: _float("AUDIT_SEAL_INTERVAL_SECONDS", "10"))
+    # Una fila pendiente más tiempo que esto se concilia como error: el cierre se perdió.
+    # Por encima de la duración máxima de un streaming más el tiempo de espera del proveedor
+    audit_pending_max_seconds: float = field(default_factory=lambda: _float("AUDIT_PENDING_MAX_SECONDS", "2400"))
+
     # --- Comprobaciones de salud: tiempo máximo por dependencia
     health_timeout_seconds: float = field(default_factory=lambda: _float("HEALTH_TIMEOUT_SECONDS", "2"))
 
