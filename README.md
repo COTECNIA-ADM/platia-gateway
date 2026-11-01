@@ -152,7 +152,8 @@ Cómo comprobar la firma en el receptor, la lista de métricas y el WebSocket:
 
 ## Panel de administración
 
-La API del panel (`/admin/*`) permite a un administrador con MFA gestionar su organización:
+El panel web está en http://localhost:8090/panel/. Con él (y con su API, `/admin/*`) un
+administrador con MFA gestiona su organización:
 aplicaciones y claves, personas, cuotas, reglas de contenido, webhooks, auditoría y un
 resumen de uso. El catálogo de proveedores y modelos lo cambia solo quien opera el gateway
 (`cli set-user --operator si`). Cada cambio queda registrado. Rutas en

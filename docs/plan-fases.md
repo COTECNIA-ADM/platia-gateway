@@ -19,7 +19,7 @@ Alcance acordado: bloques A y B (G0–G9, hechos) y después el bloque C (G10–
 | G10 | Identidad de personas | Contraseña y TOTP, sesiones revocables con renovación rotada, claves personales (ADR-014); SSO/OIDC cuando se elija proveedor | 16–18 | Hecha |
 | G11 | Eficiencia (opcional) | Caché exacta por aplicación y persona, cifrada y opcional (ADR-015); sin compresión de prompts | 8–9 | Hecha |
 | G12 | Telemetría | Métricas de Prometheus, tiempo propio del gateway (RNF-06), avisos por webhook firmado y tiempo real por WebSocket (ADR-016) | 24 | Hecha |
-| G13 | Panel de administración | API `/admin/*` con papeles y registro de cambios (G13a, ADR-017) y app React: operaciones, proveedores y routing, cuotas, firewall, auditoría (G13b) | 27–29 | En curso |
+| G13 | Panel de administración | API `/admin/*` con papeles y registro de cambios (G13a, ADR-017) y app React: operaciones, proveedores y routing, cuotas, firewall, auditoría (G13b) | 27–29 | Hecha |
 | G14 | Portal de usuario | Cuenta, seguridad, claves y consumo propios | 30–31 | Más adelante |
 | G15 | Despliegue y operación | Compose de producción, Nginx endurecido, Celery, GHCR, copias y restauración | 33–34 | Más adelante |
 

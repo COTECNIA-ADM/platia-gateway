@@ -71,7 +71,7 @@ def test_login_sin_mfa_y_me(client, people, world):
     assert "samesite=strict" in cookie.lower() and "Secure" not in cookie  # en desarrollo, sin HTTPS
     me = client.get("/auth/me", headers=_auth(body["access_token"])).json()
     assert me == {"id": people.ana, "email": ANA, "name": "Ana", "role": "member", "organization_id": world.org_id,
-                  "mfa_enabled": False, "scope": "full"}
+                  "mfa_enabled": False, "scope": "full", "platform_operator": False}
 
 
 def test_credenciales_incorrectas_mismo_mensaje(client, people):

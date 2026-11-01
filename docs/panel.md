@@ -1,4 +1,21 @@
-# API del panel de administración
+# Panel de administración
+
+El panel web está en **http://localhost:8090/panel/** (en producción, en `/panel/` del
+dominio del gateway). Entra un administrador con su correo, su contraseña y el código de la
+app autenticadora; la primera vez, el panel le pide activar el MFA. Secciones: resumen con
+peticiones en vivo, aplicaciones y claves, personas, cuotas, seguridad de contenido,
+auditoría (con exportación), webhooks, catálogo de modelos y registro de cambios.
+
+Desarrollo del panel (`panel/`, React + TypeScript + Vite), con el gateway levantado:
+
+```bash
+cd panel && npm ci
+npm run dev        # http://localhost:5173/panel/ (llama al gateway de :8090)
+npm test           # pruebas de pantallas (Vitest + Testing Library)
+npm run build      # lo que se copia en la imagen de Nginx
+```
+
+## API
 
 Todo cuelga de `/admin/` y pide `Authorization: Bearer <token de acceso>` de una persona con
 rol `admin` y MFA activo (G10). Cada administrador ve y cambia solo su organización; lo de
@@ -11,7 +28,7 @@ curl -s http://localhost:8090/auth/login -H 'Content-Type: application/json' \
 curl -s http://localhost:8090/admin/overview?hours=24 -H "Authorization: Bearer $TOKEN"
 ```
 
-## Rutas
+### Rutas
 
 | Ruta | Qué hace |
 | --- | --- |
@@ -36,7 +53,7 @@ curl -s http://localhost:8090/admin/overview?hours=24 -H "Authorization: Bearer 
 | `GET/POST /admin/models/{id}/prices` | Precios desde una fecha (operadores escriben) |
 | `POST /admin/deployments`, `PATCH /admin/deployments/{id}`, `DELETE …/{id}/cooldown` | Despliegues, peso, prioridad y quitar el enfriamiento (operadores) |
 
-## Convenciones
+### Convenciones
 - Campos desconocidos: 400. Duplicados: 409. Sin permiso: 403. De otra organización: 404.
 - Listados largos: `{"data": [...], "next": <id o null>}`; la página siguiente con `before_id=<next>`.
 - Importes en USD como texto decimal (`"0.0125"`) y fechas ISO en UTC.

@@ -55,6 +55,19 @@ JSON Lines con el hash de cadena de cada fila (máximo 100 000 filas por exporta
 un resumen por modelo, aplicación y hora con los percentiles de latencia y de tiempo propio.
 Nunca hay texto de prompts ni respuestas, porque no se guarda.
 
+**La aplicación web (G13b).** React 18 con TypeScript y Vite, las mismas piezas que el
+frontal de PLATIA, compilada dentro de la imagen de Nginx (`nginx/Dockerfile`) y servida en
+`/panel/` desde el mismo origen que la API, sin CORS. Reglas:
+- El token de acceso vive solo en memoria; la renovación va en la cookie HttpOnly de `/auth`
+  con `X-Requested-With`. Recargar la página renueva la sesión con esa cookie.
+- El WebSocket `/events/stream` lleva el token en el subprotocolo y se reconecta con espera
+  creciente de 1 s a 30 s (cap. 27); si la sesión caduca (4401), renueva antes.
+- Política de contenido estricta en `/panel/`: solo código y estilos propios y conexiones al
+  mismo origen. Sin `dangerouslySetInnerHTML` ni almacenamiento del navegador (lo comprueba
+  `src/test/conventions.test.ts`).
+- Cada gráfico tiene vista de tabla; los filtros de la auditoría van en la URL.
+- Lo que solo puede cambiar quien opera el gateway se ve en modo lectura para el resto.
+
 ## Lo que no entra ahora
 - **Portal de cumplimiento del AI Act**: el registro de usos, propósitos y la exportación de
   la auditoría ya dan la base. Un portal específico (inventario de sistemas, evaluaciones de

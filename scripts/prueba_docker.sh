@@ -490,5 +490,9 @@ for action in team.create application.create key.create key.revoke; do
 done
 ! grep -q "$panel_key" <<<"$actions" || { echo "FALLO: la clave en claro está en el registro de cambios"; exit 1; }
 echo "ok: cada cambio queda en el registro, sin secretos"
+panel="$(curl -s -D - "$BASE/panel/auditoria-filtrada?status=error")"
+grep -q "^HTTP/1.1 200" <<<"$panel" && grep -qi "content-security-policy: default-src 'none'; script-src 'self'" <<<"$panel" \
+  && grep -q '<div id="root">' <<<"$panel" || { echo "FALLO: Nginx no sirve el panel con su política de contenido"; exit 1; }
+echo "ok: Nginx sirve el panel en /panel/ (también sus rutas) con una política de contenido estricta"
 
 echo "== Prueba superada"
