@@ -70,6 +70,7 @@ async def resolve(deps: Deps, raw: str) -> Identity:
         allowed_purposes=tuple(app.allowed_purposes or ()),
         allowed_models=tuple(app.allowed_models) if app.allowed_models is not None else None,
         allowed_providers=tuple(org.allowed_providers) if org.allowed_providers is not None else None,
+        audit_salt=org.audit_salt,
     )
 
 

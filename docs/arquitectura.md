@@ -86,7 +86,7 @@ describe 14 etapas; este gateway empieza con 8 y las demás se añaden si hacen 
 | 5 | `route` | Despliegue y adaptador del proveedor | Se rechaza (503) | G3, G6 |
 | 6 | `execute` | Llamada al proveedor con tiempo máximo y cadena de reserva | Siguiente de la cadena; si no queda, 502 | G3, G6 |
 | 7 | `security_output` | Filtro de salida, también por trozos en streaming | Se corta la respuesta | G8 |
-| 8 | `audit` | Registro, coste y cabeceras de respuesta | Ver política de fallo de auditoría | G3, G9 |
+| 8 | `audit` | Registro con huellas, coste y cabeceras; después se sella en cadena | Sin apertura, se rechaza; el cierre se concilia | G3, G9 |
 
 Atajos: una etapa puede cortar el pipeline (identidad inválida, bloqueo de seguridad, cuota
 agotada). La auditoría se ejecuta siempre, también en los cortes y cuando el cliente se
@@ -126,6 +126,13 @@ clasificación, secretos y datos personales (`content.py`) y aplican la polític
 `content_policies`: bloquear, tachar o anotar. `security_output` hace lo mismo con la
 respuesta y, en streaming, `streaming.OutputFilter` lo hace por trozos. Lo encontrado va a
 `audit_logs.security_flags`, sin el texto.
+
+**Auditoría verificable** (G9, [ADR-013](adr/ADR-013-auditoria-verificable.md)): la
+apertura guarda la huella del prompt y de la persona (HMAC con la sal de la organización).
+Un proceso en segundo plano (`audit_chain.py`) sella por orden las filas cerradas con una
+cadena SHA-256 y concilia las que se quedaron pendientes. Unos disparadores de MySQL
+impiden cambiar o borrar una fila sellada, salvo seudonimizar a la persona.
+`cli audit-verify` recalcula la cadena.
 
 **Etapas del libro que no entran ahora**: ganchos corporativos antes y después del chat
 (con los webhooks de G12), caché exacta y semántica (G11, opcional), contexto RAG (PLATIA
@@ -214,6 +221,7 @@ erDiagram
 | `usage_limits` | Cuotas y límites de ritmo por ámbito, métrica y periodo | G7 |
 | `content_policies` | Acción por categoría de contenido, sentido y organización o aplicación | G8 |
 | `audit_logs` | Una fila por petición: quién, qué, resultado, tokens, coste, hashes | G3, G9 |
+| `audit_chain_state` | Último eslabón sellado de la cadena de la auditoría | G9 |
 
 `audit_logs` no tiene claves foráneas, para sobrevivir a cambios en la configuración.
 

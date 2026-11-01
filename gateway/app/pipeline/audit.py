@@ -18,6 +18,7 @@ import structlog
 from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 
+from ..audit_chain import HASH_VERSION, keyed_digest, prompt_digest
 from ..contracts import Usage
 from ..errors import PermissionDenied, QuotaExceeded, RateLimited, Unavailable
 from ..models import AuditLog, AuditStatus, ModelPrice
@@ -46,6 +47,10 @@ def _who(ctx: PipelineContext) -> dict:
         "organization_id": identity.organization_id, "team_id": identity.team_id,
         "application_id": identity.application_id, "api_key_prefix": identity.api_key_prefix,
         "end_user_ref": ctx.end_user_ref, "purpose": ctx.purpose,
+        # Huellas con la sal de la organización (G9): sin el texto ni el valor
+        "end_user_digest": keyed_digest(identity.audit_salt, ctx.end_user_ref) if ctx.end_user_ref else None,
+        "prompt_hash": prompt_digest(identity.audit_salt, ctx.body) if ctx.body else None,
+        "hash_version": HASH_VERSION,
         "requested_model": (ctx.requested_model or "")[:128] or None,
         "model_key": ctx.model.key if ctx.model else None,
         "deployment_id": ctx.target.deployment_id if ctx.target else None,
@@ -104,7 +109,12 @@ async def close(ctx: PipelineContext, deps: Deps) -> None:
             if ctx.audit_id is None:
                 db.add(AuditLog(**{**_who(ctx), **values}))
             else:
-                await db.execute(update(AuditLog).where(AuditLog.id == ctx.audit_id).values(**values))
+                # Solo si sigue pendiente: si la conciliación (G9) ya la cerró, se respeta
+                result = await db.execute(update(AuditLog).where(
+                    AuditLog.id == ctx.audit_id, AuditLog.status == AuditStatus.PENDING).values(**values))
+                if not result.rowcount:
+                    log.warning("audit.close_late", request_id=ctx.request_id, audit_id=ctx.audit_id,
+                                input_tokens=usage.input, output_tokens=usage.output)
             await db.commit()
     except SQLAlchemyError as exc:
         log.error("audit.close_failed", request_id=ctx.request_id, audit_id=ctx.audit_id,

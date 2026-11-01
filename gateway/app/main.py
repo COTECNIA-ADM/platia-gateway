@@ -4,7 +4,8 @@ Al arrancar crea las conexiones (MySQL, Redis y el cliente HTTP hacia los provee
 carga la clave de cifrado. Las rutas de inferencia están en `api.py` y el pipeline en
 `pipeline/`.
 """
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 from functools import partial
 
 import httpx
@@ -13,7 +14,7 @@ from fastapi import FastAPI, Request
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from . import __version__
+from . import __version__, audit_chain
 from .api import router as api_router
 from .crypto import load_key
 from .errors import InternalError, contract_for, error_response
@@ -25,6 +26,19 @@ from .pipeline.runner import request_id_of
 from .settings import Settings, get_settings
 
 log = structlog.get_logger(__name__)
+
+
+async def seal_forever(deps: Deps) -> None:
+    """Sella la auditoría cada `AUDIT_SEAL_INTERVAL_SECONDS` (G9). Un fallo no para el gateway:
+    va al log y se reintenta en la vuelta siguiente."""
+    settings = deps.settings
+    while True:
+        try:
+            while await audit_chain.seal(deps.sessions, settings.audit_pending_max_seconds) >= audit_chain.SEAL_BATCH:
+                pass  # quedan más: seguir sin esperar
+        except Exception as exc:  # noqa: BLE001 - cualquier fallo se registra y se reintenta
+            log.error("audit.seal_failed", error_type=type(exc).__name__)
+        await asyncio.sleep(settings.audit_seal_interval_seconds)
 
 
 def create_app(settings: Settings | None = None, checks: dict[str, Check] | None = None,
@@ -55,9 +69,14 @@ def create_app(settings: Settings | None = None, checks: dict[str, Check] | None
         if encryption_key is None:
             log.warning("gateway.no_encryption_key", detail="sin ENCRYPTION_KEY no se pueden usar proveedores con clave")
         log.info("gateway.started", version=__version__, env=settings.env)
+        sealer = asyncio.create_task(seal_forever(app.state.deps)) if settings.audit_seal_interval_seconds > 0 else None
         try:
             yield
         finally:
+            if sealer is not None:
+                sealer.cancel()
+                with suppress(asyncio.CancelledError):
+                    await sealer
             await http.aclose()
             await redis.aclose()
             await engine.dispose()

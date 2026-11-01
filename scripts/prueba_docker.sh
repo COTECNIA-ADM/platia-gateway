@@ -242,4 +242,44 @@ docker compose up -d --wait redis >/dev/null 2>&1
 echo "ok: con límites y sin Redis → 503"
 [ "$code_luis" = 200 ] || { echo "FALLO: sin límites y sin Redis se esperaba 200 (recibido $code_luis)"; exit 1; }
 echo "ok: sin límites no hace falta Redis → 200"
+echo "== Auditoría verificable (cadena, disparadores y RGPD)"
+cli audit-seal
+out="$(cli audit-verify)"; echo "$out"
+grep -q "Cadena íntegra" <<<"$out" || { echo "FALLO: la cadena de la auditoría no está íntegra"; exit 1; }
+tamper="$(docker compose exec -T gateway python - "$prefix" <<'PY'
+import asyncio, sys
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
+from app.settings import Settings
+
+async def attempt(engine, sql, prefix):
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text(sql), {"p": prefix})
+        return "permitido"
+    except Exception as exc:  # el disparador lo rechaza
+        return "rechazado" if "audit_logs:" in str(exc) else f"error inesperado: {exc}"
+
+async def main():
+    engine = create_async_engine(Settings().database_url)
+    where = "api_key_prefix = :p AND chain_hash IS NOT NULL ORDER BY id LIMIT 1"
+    results = [await attempt(engine, f"UPDATE audit_logs SET cost_usd = 0 WHERE {where}", sys.argv[1]),
+               await attempt(engine, f"DELETE FROM audit_logs WHERE {where}", sys.argv[1])]
+    await engine.dispose()
+    print(" ".join(results))
+
+asyncio.run(main())
+PY
+)"
+echo "cambiar una fila sellada: ${tamper%% *}; borrarla: ${tamper#* }"
+[ "$tamper" = "rechazado rechazado" ] || { echo "FALLO: MySQL debía rechazar cambiar y borrar filas selladas"; exit 1; }
+echo "ok: MySQL no deja cambiar ni borrar una fila sellada"
+cli audit-pseudonymize --org "$RUN" --user 42
+exported="$(cli audit-export --org "$RUN" --user 42 --pseudonymize 2>/dev/null)"
+[ "$(grep -c '"chain_hash"' <<<"$exported")" -ge 1 ] && ! grep -q '"end_user_ref"' <<<"$exported" \
+  || { echo "FALLO: la exportación de la persona 42 no es la esperada"; echo "$exported"; exit 1; }
+echo "ok: la persona 42 se encuentra por su huella tras seudonimizarla"
+cli audit-verify | grep -q "Cadena íntegra" || { echo "FALLO: seudonimizar ha roto la cadena"; exit 1; }
+echo "ok: seudonimizar no rompe la cadena"
+
 echo "== Prueba superada"

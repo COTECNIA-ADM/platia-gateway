@@ -17,3 +17,4 @@ descartaron. Para cambiar una decisión se escribe un ADR nuevo que sustituya al
 | [010](ADR-010-reserva-y-enfriamiento.md) | Reserva entre despliegues y modelos permitidos, con enfriamiento pasivo en Redis | Aceptado |
 | [011](ADR-011-cuotas-y-limites.md) | Cuotas y límites de ritmo con contadores en Redis, ventanas naturales y la auditoría como respaldo | Aceptado |
 | [012](ADR-012-seguridad-de-contenido.md) | Seguridad de contenido con detectores locales y política por organización y aplicación | Aceptado |
+| [013](ADR-013-auditoria-verificable.md) | Auditoría verificable: sellado posterior en cadena SHA-256, disparadores y seudonimización por huella | Aceptado |

@@ -5,6 +5,7 @@ salida y 2000 de caché leída: 0,0111 USD con su precio (3 / 15 / 0,3 USD por M
 """
 import asyncio
 import dataclasses
+import time
 from decimal import Decimal
 
 import httpx
@@ -19,6 +20,15 @@ from .conftest import needs_db
 
 pytestmark = needs_db
 COST = Decimal("0.0111")
+
+
+
+@pytest.fixture(autouse=True)
+def _misma_ventana_de_minuto():
+    """Las pruebas de ventana por minuto fallarían si cruzaran el cambio de minuto a mitad."""
+    second = time.time() % 60
+    if second > 54:
+        time.sleep(60.5 - second)
 
 
 def _post(client, world, *, user=None, stream=False, contract="anthropic"):

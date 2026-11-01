@@ -103,6 +103,21 @@ cli set-content-policy --org cotecnia --app platia --direction input --check pii
 Lo encontrado (tipo y número, nunca el dato) queda en `security_flags` de la auditoría y
 en la cabecera `X-Platia-Content-Flags`. Detalles en [ADR-012](docs/adr/ADR-012-seguridad-de-contenido.md).
 
+## Auditoría verificable
+
+Cada petición deja una fila en `audit_logs` con quién, qué modelo, resultado, tokens, coste y
+lo que encontró la seguridad de contenido, y la huella del prompt (nunca el texto). El
+gateway sella las filas en una cadena SHA-256 y MySQL impide cambiarlas o borrarlas.
+
+```bash
+cli audit-verify                                   # ¿está íntegra la cadena?
+cli audit-export --org cotecnia --since 2026-11-01 > auditoria.jsonl
+cli audit-export --org cotecnia --user 7           # petición de acceso de una persona (RGPD)
+cli audit-pseudonymize --org cotecnia --user 7     # seudonimizarla sin romper la cadena
+```
+
+Detalles en [ADR-013](docs/adr/ADR-013-auditoria-verificable.md).
+
 ## Conexión con PLATIA
 
 `bash scripts/alta_platia.sh` (con `ANTHROPIC_API_KEY` exportada) da de alta PLATIA con sus

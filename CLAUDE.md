@@ -24,7 +24,8 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
 - Alta de configuración (hasta el panel, G13): `docker compose run --rm migrations python -m app.cli <orden>`
   (`create-org`, `create-app`, `create-key`, `create-provider`, `create-model`, `create-deployment`,
   `set-price`, `set-fallbacks`, `set-deployment`, `set-limit`, `remove-limit`, `limits`,
-  `set-content-policy`, `content-policies`, `revoke-key`,
+  `set-content-policy`, `content-policies`, `audit-seal`, `audit-verify`, `audit-export`,
+  `audit-pseudonymize`, `revoke-key`,
   `show`, `usage`; `--exists-ok` para
   guiones que se repiten)
 - Prueba en Docker sin coste (con la plataforma levantada): `bash scripts/prueba_docker.sh`
@@ -63,6 +64,9 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
 - Contenido (ADR-012): detectores en `app/content.py` (deterministas, sin llamar a otro modelo)
   y acción por casilla en `content_policies`. Nunca se guarda ni se registra el texto
   encontrado; solo categoría, tipo y recuento en `security_flags`.
+- Auditoría (ADR-013): una fila sellada (`chain_hash`) no se cambia ni se borra (disparadores);
+  solo se puede seudonimizar `end_user_ref`. Una columna nueva en la cadena (`CHAIN_FIELDS`)
+  exige otra `hash_version`. Los tests vacían las tablas con TRUNCATE, nunca con DELETE.
 - Cada fase llega en un PR con tests, `ruff` y cobertura en verde, y una prueba en Docker
   que se pueda repetir.
 - No exponer MySQL ni Redis fuera de `data_net`. Nginx solo publica las rutas que tocan.

@@ -7,7 +7,9 @@ Uso dentro de Docker (el contenedor de migraciones tiene acceso a MySQL):
 Órdenes: create-org, create-team, create-app, create-key, revoke-key, create-provider,
 create-model, set-fallbacks (cadena de reserva), create-deployment, set-deployment
 (prioridad, peso o estado), set-price, set-limit, remove-limit y limits (cuotas y límites de
-ritmo, G7), set-content-policy y content-policies (seguridad de contenido, G8), show y usage (consumo y coste, para compararlo con lo que registra PLATIA).
+ritmo, G7), set-content-policy y content-policies (seguridad de contenido, G8),
+audit-seal, audit-verify, audit-export y audit-pseudonymize (auditoría verificable y RGPD,
+G9), show y usage (consumo y coste, para compararlo con lo que registra PLATIA).
 `python -m app.cli <orden> -h` explica cada una.
 
 La clave de un proveedor nunca va como argumento (quedaría en el historial de la shell):
@@ -15,19 +17,23 @@ se lee de una variable de entorno (`--api-key-env`) o de la entrada estándar. L
 una aplicación se enseña una sola vez, al crearla.
 """
 import argparse
+import asyncio
 import getpass
+import json
 import os
 import sys
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import case, create_engine, func, select
+from sqlalchemy import case, create_engine, func, or_, select, update
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .crypto import encrypt, load_key
 from .keys import new_application_key
+from . import audit_chain
 from .content_policy import ALLOWED, DEFAULTS
 from .limits import window
 from .models import (ApiKey, Application, ApplicationStatus, AuditLog, AuditStatus, ContentAction, ContentCheck,
@@ -354,6 +360,78 @@ def content_policies(db: Session, args, settings: Settings) -> None:
         _out(f"{direction:<6} {check:<10} {action:<6} ({origin})")
 
 
+def _run_async(settings: Settings, work):
+    """Las órdenes de la cadena usan el mismo código asíncrono que el gateway."""
+    async def main():
+        engine = create_async_engine(settings.database_url)
+        try:
+            return await work(async_sessionmaker(engine, expire_on_commit=False))
+        finally:
+            await engine.dispose()
+    return asyncio.run(main())
+
+
+def audit_seal(db: Session, args, settings: Settings) -> None:
+    async def work(sessions):
+        total = 0
+        while (sealed := await audit_chain.seal(sessions, settings.audit_pending_max_seconds)) > 0:
+            total += sealed
+        return total
+    _out(f"Filas selladas: {_run_async(settings, work)}")
+
+
+def audit_verify(db: Session, args, settings: Settings) -> None:
+    result = _run_async(settings, audit_chain.verify)
+    if not result.ok:
+        raise CliError(f"{result.message} (fila {result.broken_at}; comprobadas {result.checked} hasta la "
+                       f"{result.last_id})")
+    _out(f"{result.message}: {result.checked} filas selladas comprobadas, hasta la {result.last_id}")
+
+
+def _person_digest(org: Organization, ref: str) -> str:
+    return audit_chain.keyed_digest(org.audit_salt, ref)
+
+
+def audit_export(db: Session, args, settings: Settings) -> None:
+    """Filas de la auditoría en JSON (una por línea), con su hash, para un auditor o una
+    petición de acceso (RGPD). Nunca hay texto de la conversación: no se guarda."""
+    org = _org(db, args.org)
+    where = [AuditLog.organization_id == org.id]
+    if args.app:
+        where.append(AuditLog.application_id == _one(db, Application, organization_id=org.id, slug=args.app,
+                                                     deleted_at=None).id)
+    if args.user:
+        # Por la huella (sirve también tras seudonimizar) o, en filas anteriores a G9, por la referencia
+        where.append(or_(AuditLog.end_user_digest == _person_digest(org, args.user),
+                         AuditLog.end_user_ref == args.user))
+    if args.since:
+        where.append(AuditLog.created_at >= datetime.fromisoformat(args.since))
+    if args.until:
+        where.append(AuditLog.created_at < datetime.fromisoformat(args.until))
+    count = 0
+    for row in db.execute(select(AuditLog).where(*where).order_by(AuditLog.id)).scalars():
+        data = json.loads(audit_chain.row_payload(row))
+        data["chain_hash"] = row.chain_hash
+        if not args.pseudonymize:
+            data["end_user_ref"] = row.end_user_ref
+        _out(json.dumps(data, ensure_ascii=False, sort_keys=True))
+        count += 1
+    sys.stderr.write(f"Exportadas {count} filas\n")
+
+
+def audit_pseudonymize(db: Session, args, settings: Settings) -> None:
+    """Sustituye la referencia de una persona por un seudónimo en toda la auditoría (RGPD).
+
+    La cadena no se rompe: cubre la huella, no la referencia. Con la sal de la organización
+    el seudónimo aún se puede relacionar con la persona (es seudonimización, no anonimización).
+    """
+    org = _org(db, args.org)
+    pseudonym = "seud:" + _person_digest(org, args.user)[:24]
+    result = db.execute(update(AuditLog).where(AuditLog.organization_id == org.id,
+                                               AuditLog.end_user_ref == args.user).values(end_user_ref=pseudonym))
+    _out(f"Persona {args.user!r} seudonimizada como {pseudonym} en {result.rowcount} filas")
+
+
 def show(db: Session, args, settings: Settings) -> None:
     for org in db.execute(select(Organization).where(Organization.deleted_at.is_(None))).scalars():
         _out(f"Organización {org.slug} ({'activa' if org.is_active else 'inactiva'})")
@@ -533,6 +611,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--org", required=True)
     p.add_argument("--app")
     p.set_defaults(handler=content_policies)
+
+    p = sub.add_parser("audit-seal", help="Sellar ahora las filas cerradas de la auditoría (G9)")
+    p.set_defaults(handler=audit_seal)
+
+    p = sub.add_parser("audit-verify", help="Comprobar que la cadena de la auditoría está íntegra")
+    p.set_defaults(handler=audit_verify)
+
+    p = sub.add_parser("audit-export", help="Exportar la auditoría en JSON, una fila por línea")
+    p.add_argument("--org", required=True)
+    p.add_argument("--app")
+    p.add_argument("--user", help="Solo las filas de esta persona (X-Platia-User-Id), también seudonimizadas")
+    p.add_argument("--since", help="Desde (fecha ISO en UTC, incluida)")
+    p.add_argument("--until", help="Hasta (fecha ISO en UTC, excluida)")
+    p.add_argument("--pseudonymize", action="store_true", help="Sin la referencia de la persona, solo su huella")
+    p.set_defaults(handler=audit_export)
+
+    p = sub.add_parser("audit-pseudonymize", help="Seudonimizar a una persona en la auditoría (RGPD)")
+    p.add_argument("--org", required=True)
+    p.add_argument("--user", required=True, help="Su X-Platia-User-Id")
+    p.set_defaults(handler=audit_pseudonymize)
 
     p = sub.add_parser("show", help="Resumen de organizaciones, aplicaciones y modelos")
     p.set_defaults(handler=show)
