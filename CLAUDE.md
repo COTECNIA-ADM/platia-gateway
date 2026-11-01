@@ -20,7 +20,8 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
   `cd gateway && alembic revision --autogenerate -m "..."`, revisarla a mano y probar
   upgrade/downgrade/upgrade
 - Tests con base de datos: `TEST_DATABASE_URL=mysql+pymysql://usuario:clave@host:puerto/base pytest`
-  (vacía y recrea la base: nunca una con datos)
+  (vacía y recrea la base: nunca una con datos; el MySQL necesita
+  `log_bin_trust_function_creators=1` para los disparadores de la auditoría)
 - Alta de configuración (hasta el panel, G13): `docker compose run --rm migrations python -m app.cli <orden>`
   (`create-org`, `create-app`, `create-key`, `create-provider`, `create-model`, `create-deployment`,
   `set-price`, `set-fallbacks`, `set-deployment`, `set-limit`, `remove-limit`, `limits`,
