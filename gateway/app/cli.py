@@ -11,7 +11,8 @@ create-model, set-fallbacks (cadena de reserva), create-deployment, set-deployme
 (prioridad, peso o estado), set-price, set-limit, remove-limit y limits (cuotas y límites de
 ritmo, G7), set-content-policy y content-policies (seguridad de contenido, G8),
 audit-seal, audit-verify, audit-export y audit-pseudonymize (auditoría verificable y RGPD,
-G9), show y usage (consumo y coste, para compararlo con lo que registra PLATIA).
+G9), create-webhook, webhooks, set-webhook y webhook-test (avisos firmados, G12), latency
+(tiempo propio del gateway, RNF-06), show y usage (consumo y coste, para compararlo con lo que registra PLATIA).
 `python -m app.cli <orden> -h` explica cada una.
 
 La clave de un proveedor y la contraseña de una persona nunca van como argumento (quedarían
@@ -34,6 +35,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from . import webhooks as hooks
 from .crypto import encrypt, load_key
 from .keys import new_application_key, new_user_key
 from . import passwords
@@ -42,7 +44,8 @@ from . import audit_chain
 from .content_policy import ALLOWED, DEFAULTS
 from .limits import window
 from .models import (ApiKey, Application, ApplicationStatus, AuditLog, AuditStatus, ContentAction, ContentCheck,
-                     ContentPolicy, Deployment, Direction, KeyKind, PolicyScope,
+                     ContentPolicy, DeliveryStatus, Deployment, Direction, KeyKind, PolicyScope, Webhook,
+                     WebhookDelivery,
                      LimitMetric, LimitPeriod, LimitScope, LlmModel, ModelFamily, ModelPrice, Organization, Provider,
                      ProviderKind, Team, UsageLimit, User, UserRole, UserSession)
 from .models.base import utcnow
@@ -612,6 +615,137 @@ def usage(db: Session, args, settings: Settings) -> None:
     _out(f"Total: {total:.6f} USD en {sum(r[2] for r in rows)} llamadas")
 
 
+# --- Webhooks y latencia (G12)
+
+def create_webhook(db: Session, args, settings: Settings) -> None:
+    if not settings.encryption_key:
+        raise CliError("Falta ENCRYPTION_KEY: no se puede guardar el secreto del webhook")
+    if bool(args.org) == bool(args.all_orgs):
+        raise CliError("Indica --org (eventos de una organización) o --global (todos, para quien opera el gateway)")
+    try:
+        hooks.check_url(args.url, settings.webhook_private_host_set)
+        events = hooks.validate_events(args.event or [])
+    except ValueError as exc:
+        raise CliError(str(exc)) from exc
+    org = _org(db, args.org) if args.org else None
+    secret = hooks.new_secret()
+    webhook = Webhook(organization_id=org.id if org else None, name=args.name, url=args.url, events=events,
+                      secret_encrypted="-")
+    db.add(webhook)
+    db.flush()
+    webhook.secret_encrypted = hooks.seal_secret(secret, webhook_id=webhook.id, key=load_key(settings.encryption_key))
+    _out(f"Webhook {webhook.id} creado para {', '.join(events)}. Guarda el secreto de firma (no se vuelve a mostrar):")
+    _out(secret)
+
+
+def list_webhooks(db: Session, args, settings: Settings) -> None:
+    query = select(Webhook).where(Webhook.deleted_at.is_(None)).order_by(Webhook.id)
+    if args.org:
+        query = query.where(Webhook.organization_id == _org(db, args.org).id)
+    for hook in db.execute(query).scalars():
+        counts = dict(db.execute(select(WebhookDelivery.status, func.count()).where(
+            WebhookDelivery.webhook_id == hook.id).group_by(WebhookDelivery.status)).all())
+        last = db.execute(select(WebhookDelivery).where(WebhookDelivery.webhook_id == hook.id)
+                          .order_by(WebhookDelivery.id.desc()).limit(1)).scalar_one_or_none()
+        state = "activo" if hook.is_active else f"desactivado ({hook.disabled_reason or 'a mano'})"
+        _out(f"[{hook.id}] {hook.name} → {hook.url} ({state}; {'global' if hook.organization_id is None else 'org'})")
+        _out(f"    eventos: {', '.join(hook.events)}; entregas: "
+             + ", ".join(f"{status} {counts.get(status, 0)}" for status in DeliveryStatus))
+        if last is not None:
+            _out(f"    última: {last.event} {last.status} intento {last.attempts} "
+                 f"{last.last_status_code or ''} {last.last_error or ''}".rstrip())
+
+
+def set_webhook(db: Session, args, settings: Settings) -> None:
+    hook = _one(db, Webhook, id=args.id, deleted_at=None)
+    if args.url:
+        try:
+            hooks.check_url(args.url, settings.webhook_private_host_set)
+        except ValueError as exc:
+            raise CliError(str(exc)) from exc
+        hook.url = args.url
+    if args.event:
+        try:
+            hook.events = hooks.validate_events(args.event)
+        except ValueError as exc:
+            raise CliError(str(exc)) from exc
+    if args.enable:
+        hook.is_active, hook.disabled_reason, hook.consecutive_failures = True, None, 0
+    if args.disable:
+        hook.is_active, hook.disabled_reason = False, None
+    if args.delete:
+        hook.is_active, hook.deleted_at = False, utcnow()
+    if args.delete or args.disable:
+        # Lo pendiente ya no se envía
+        db.execute(update(WebhookDelivery).where(WebhookDelivery.webhook_id == hook.id,
+                                                 WebhookDelivery.status == DeliveryStatus.PENDING)
+                   .values(status=DeliveryStatus.CANCELLED, last_error="webhook_inactivo"))
+    if args.rotate_secret:
+        if not settings.encryption_key:
+            raise CliError("Falta ENCRYPTION_KEY: no se puede guardar el secreto del webhook")
+        secret = hooks.new_secret()
+        hook.secret_encrypted = hooks.seal_secret(secret, webhook_id=hook.id, key=load_key(settings.encryption_key))
+        _out("Secreto nuevo (el anterior deja de valer ya; no se vuelve a mostrar):")
+        _out(secret)
+    _out(f"Webhook {hook.id}: {'borrado' if args.delete else 'activo' if hook.is_active else 'desactivado'}")
+
+
+def webhook_test(db: Session, args, settings: Settings) -> None:
+
+    from .pipeline.context import Deps
+
+    if not settings.encryption_key:
+        raise CliError("Falta ENCRYPTION_KEY: no se puede leer el secreto del webhook")
+    _one(db, Webhook, id=args.id, deleted_at=None)
+
+    async def work(sessions):
+        deps = Deps(settings=settings, sessions=sessions, http=None, encryption_key=load_key(settings.encryption_key))
+        async with hooks.client(settings) as http:
+            return await hooks.send_test(deps, http, args.id)
+
+    result = _run_async(settings, work)
+    detail = f"HTTP {result.status_code}" if result.status_code else result.error
+    if not result.ok:
+        raise CliError(f"La entrega de prueba falló: {detail} ({result.duration_ms} ms)")
+    _out(f"Entrega de prueba recibida: {detail} en {result.duration_ms} ms")
+
+
+def _percentile(values: list[int], pct: float) -> int:
+    """Percentil por el método del rango más cercano (values ordenados)."""
+    index = max(0, min(len(values) - 1, -(-len(values) * pct // 100) - 1))
+    return values[int(index)]
+
+
+def latency(db: Session, args, settings: Settings) -> None:
+    """Tiempo propio del gateway (sin el proveedor) de las peticiones atendidas por un proveedor (RNF-06)."""
+    since = datetime.fromisoformat(args.since) if args.since else utcnow() - timedelta(hours=args.hours)
+    query = select(AuditLog.overhead_ms, AuditLog.stream).where(
+        AuditLog.created_at >= since, AuditLog.status == AuditStatus.SUCCESS, AuditLog.overhead_ms.is_not(None),
+        AuditLog.provider_slug != "cache")
+    if args.app:
+        app_ids = [a.id for a in db.execute(select(Application).where(Application.slug == args.app)).scalars()]
+        if not app_ids:
+            raise CliError(f"No existe ninguna aplicación '{args.app}'")
+        query = query.where(AuditLog.application_id.in_(app_ids))
+    rows = db.execute(query.order_by(AuditLog.id.desc()).limit(args.limit)).all()
+    if not rows:
+        _out("Sin peticiones atendidas por un proveedor en el periodo")
+        return
+    _out(f"Tiempo propio del gateway desde {since:%Y-%m-%d %H:%M} UTC (sin el proveedor; objetivo RNF-06: p95 < "
+         f"{args.target} ms)")
+    _out(f"{'tipo':<12} {'peticiones':>10} {'p50':>6} {'p95':>6} {'p99':>6} {'máx':>6}")
+    groups = {"todas": [r[0] for r in rows], "sin stream": [r[0] for r in rows if not r[1]],
+              "streaming": [r[0] for r in rows if r[1]]}
+    for name, values in groups.items():
+        if not values:
+            continue
+        values.sort()
+        _out(f"{name:<12} {len(values):>10} {_percentile(values, 50):>6} {_percentile(values, 95):>6} "
+             f"{_percentile(values, 99):>6} {values[-1]:>6}")
+    p95 = _percentile(sorted(groups["todas"]), 95)
+    _out(f"p95: {p95} ms → {'dentro del objetivo' if p95 < args.target else 'FUERA del objetivo'}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m app.cli", description="Configuración del PLATIA Gateway")
     parser.add_argument("--exists-ok", action="store_true",
@@ -802,6 +936,43 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--org", required=True)
     p.add_argument("--user", required=True, help="Su X-Platia-User-Id")
     p.set_defaults(handler=audit_pseudonymize)
+
+    p = sub.add_parser("create-webhook", help="Avisos firmados a una URL (G12); el secreto se muestra una vez")
+    p.add_argument("--org", help="Eventos de esta organización")
+    p.add_argument("--global", dest="all_orgs", action="store_true",
+                   help="Eventos de todas las organizaciones y del propio gateway (despliegues)")
+    p.add_argument("--name", required=True)
+    p.add_argument("--url", required=True, help="https://… (http solo para WEBHOOK_PRIVATE_HOSTS)")
+    p.add_argument("--event", action="append",
+                   help=f"Evento (repetible): {', '.join(hooks.WEBHOOK_EVENTS)}")
+    p.set_defaults(handler=create_webhook)
+
+    p = sub.add_parser("webhooks", help="Webhooks, su estado y sus entregas")
+    p.add_argument("--org")
+    p.set_defaults(handler=list_webhooks)
+
+    p = sub.add_parser("set-webhook", help="Cambiar, activar, desactivar o borrar un webhook (id en 'webhooks')")
+    p.add_argument("--id", type=int, required=True)
+    p.add_argument("--url")
+    p.add_argument("--event", action="append", help="Sustituye la lista de eventos (repetible)")
+    state = p.add_mutually_exclusive_group()
+    state.add_argument("--enable", action="store_true", help="Activar (también tras desactivarse solo)")
+    state.add_argument("--disable", action="store_true")
+    state.add_argument("--delete", action="store_true")
+    p.add_argument("--rotate-secret", action="store_true", help="Secreto de firma nuevo (se muestra una vez)")
+    p.set_defaults(handler=set_webhook)
+
+    p = sub.add_parser("webhook-test", help="Enviar ahora un evento de prueba a un webhook")
+    p.add_argument("--id", type=int, required=True)
+    p.set_defaults(handler=webhook_test)
+
+    p = sub.add_parser("latency", help="Tiempo propio del gateway: p50, p95 y p99 (RNF-06)")
+    p.add_argument("--since", help="Desde esta fecha UTC (AAAA-MM-DD[THH:MM]); por defecto, las últimas --hours")
+    p.add_argument("--hours", type=float, default=24)
+    p.add_argument("--app")
+    p.add_argument("--limit", type=int, default=100_000, help="Como mucho estas peticiones, las más recientes")
+    p.add_argument("--target", type=int, default=50, help="Objetivo de p95 en ms")
+    p.set_defaults(handler=latency)
 
     p = sub.add_parser("show", help="Resumen de organizaciones, aplicaciones y modelos")
     p.set_defaults(handler=show)

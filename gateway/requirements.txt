@@ -14,3 +14,5 @@ alembic~=1.14
 redis~=5.2
 # Tokens de acceso de las personas (G10)
 pyjwt~=2.10
+# Métricas para Prometheus (G12)
+prometheus-client~=0.21

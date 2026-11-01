@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from . import __version__, audit_chain
+from . import __version__, audit_chain, webhooks
 from .account_api import auth_router, install_error_handlers, me_router
 from .api import router as api_router
 from .crypto import load_key
@@ -24,7 +24,9 @@ from .health import router as health_router
 from .logs import configure_logging
 from .pipeline.context import Deps
 from .pipeline.runner import request_id_of
+from .realtime import router as realtime_router
 from .settings import Settings, get_settings
+from .telemetry import router as metrics_router
 
 log = structlog.get_logger(__name__)
 
@@ -42,10 +44,18 @@ async def seal_forever(deps: Deps) -> None:
         await asyncio.sleep(settings.audit_seal_interval_seconds)
 
 
+async def _stop(task: asyncio.Task | None) -> None:
+    if task is not None:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
 def create_app(settings: Settings | None = None, checks: dict[str, Check] | None = None,
-               transport: httpx.AsyncBaseTransport | None = None, redis_client=None) -> FastAPI:
-    """Crea la aplicación. `checks`, `transport` y `redis_client` sustituyen la salud, los
-    proveedores y Redis reales (tests)."""
+               transport: httpx.AsyncBaseTransport | None = None, redis_client=None,
+               webhook_transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
+    """Crea la aplicación. `checks`, `transport`, `redis_client` y `webhook_transport`
+    sustituyen la salud, los proveedores, Redis y los receptores de webhooks reales (tests)."""
     settings = settings or get_settings()
     configure_logging(settings.log_level, settings.log_format)
     # Una clave mal escrita impide arrancar: mejor que descubrirlo en la primera petición
@@ -71,13 +81,18 @@ def create_app(settings: Settings | None = None, checks: dict[str, Check] | None
             log.warning("gateway.no_encryption_key", detail="sin ENCRYPTION_KEY no se pueden usar proveedores con clave")
         log.info("gateway.started", version=__version__, env=settings.env)
         sealer = asyncio.create_task(seal_forever(app.state.deps)) if settings.audit_seal_interval_seconds > 0 else None
+        # Entregas de webhooks (G12): cliente propio, sin redirecciones ni proxy del entorno
+        hooks_http = (httpx.AsyncClient(transport=webhook_transport, follow_redirects=False, trust_env=False)
+                      if webhook_transport is not None else webhooks.client(settings))
+        app.state.webhook_http = hooks_http
+        deliverer = (asyncio.create_task(webhooks.deliver_forever(app.state.deps, hooks_http))
+                     if settings.webhook_poll_seconds > 0 else None)
         try:
             yield
         finally:
-            if sealer is not None:
-                sealer.cancel()
-                with suppress(asyncio.CancelledError):
-                    await sealer
+            await _stop(sealer)
+            await _stop(deliverer)
+            await hooks_http.aclose()
             await http.aclose()
             await redis.aclose()
             await engine.dispose()
@@ -89,6 +104,8 @@ def create_app(settings: Settings | None = None, checks: dict[str, Check] | None
     app.include_router(api_router)
     app.include_router(auth_router)
     app.include_router(me_router)
+    app.include_router(realtime_router)
+    app.include_router(metrics_router)
     install_error_handlers(app)
 
     @app.exception_handler(Exception)

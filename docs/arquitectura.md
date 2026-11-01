@@ -96,6 +96,14 @@ desconecta a mitad de un streaming (bloque `finally`). Un acierto de la caché s
 `route` y `execute`, pero pasa por `security_output` y `audit`
 ([ADR-015](adr/ADR-015-cache-exacta.md)).
 
+**Telemetría** (G12, [ADR-016](adr/ADR-016-telemetria.md)): no es una etapa. Al terminar cada
+petición, también en streaming y en errores, `telemetry.finish` registra las métricas de
+Prometheus y publica un resumen en tiempo real. Si la seguridad de contenido la bloqueó, emite
+`security.blocked`. `quota` emite `quota.alert` y `quota.exhausted`, y `execute`,
+`deployment.cooled`. Los eventos van a Redis (WebSocket `/events/stream`) y a una cola de
+entregas en MySQL que un bucle en segundo plano envía, firmadas, a los webhooks. El tiempo
+propio del gateway (sin el proveedor) se guarda en `audit_logs.overhead_ms` para medir RNF-06.
+
 **En el código** (G3, [ADR-007](adr/ADR-007-contrato-y-pipeline-minimo.md)): cada etapa es
 un módulo de `gateway/app/pipeline/` y `runner.py` fija el orden: `auth` → `policy` →
 `security_input` y `filter` (G8) → `policy` → `cache` (G11) → `quota` (G7) → `route` → apertura de `audit` →
@@ -139,7 +147,7 @@ impiden cambiar o borrar una fila sellada, salvo seudonimizar a la persona.
 `cli audit-verify` recalcula la cadena.
 
 **Etapas del libro que no entran ahora**: ganchos corporativos antes y después del chat
-(con los webhooks de G12), caché exacta y semántica (G11, opcional), contexto RAG (PLATIA
+(los webhooks de G12 solo avisan, no deciden), caché semántica (G11, ADR-015), contexto RAG (PLATIA
 ya lo tiene), recorte del historial y control previo de ventana (descartados en G7: el proveedor ya rechaza
 lo que no cabe, con un 400 que el gateway devuelve tal cual).
 
@@ -233,6 +241,7 @@ erDiagram
 | `content_policies` | Acción por categoría de contenido, sentido y organización o aplicación | G8 |
 | `audit_logs` | Una fila por petición: quién, qué, resultado, tokens, coste, hashes | G3, G9 |
 | `audit_chain_state` | Último eslabón sellado de la cadena de la auditoría | G9 |
+| `webhooks`, `webhook_deliveries` | Destinos de los avisos (secreto cifrado, eventos, estado) y cola de entregas con sus reintentos | G12 |
 
 `audit_logs` no tiene claves foráneas, para sobrevivir a cambios en la configuración.
 

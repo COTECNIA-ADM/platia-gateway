@@ -90,6 +90,25 @@ class Settings:
     # --- Caché exacta (G11): tamaño máximo de una respuesta guardada
     cache_max_bytes: int = field(default_factory=lambda: _int("CACHE_MAX_BYTES", str(512 * 1024)))
 
+    # --- Telemetría (G12, ADR-016)
+    # /metrics (Prometheus) exige `Authorization: Bearer <METRICS_TOKEN>`; vacío = desactivado (404)
+    metrics_token: str = field(default_factory=lambda: _env("METRICS_TOKEN"))
+    # Un mismo aviso repetido (bloqueo de seguridad de una aplicación, despliegue enfriado)
+    # se envía como mucho una vez en este tiempo
+    event_dedup_seconds: int = field(default_factory=lambda: _int("EVENT_DEDUP_SECONDS", "300"))
+    # Webhooks: cada cuánto se buscan entregas pendientes (0 = no se entregan), tiempo por
+    # entrega e intentos antes de darla por fallida
+    webhook_poll_seconds: float = field(default_factory=lambda: _float("WEBHOOK_POLL_SECONDS", "2"))
+    webhook_timeout_seconds: float = field(default_factory=lambda: _float("WEBHOOK_TIMEOUT_SECONDS", "10"))
+    webhook_max_attempts: int = field(default_factory=lambda: _int("WEBHOOK_MAX_ATTEMPTS", "6"))
+    # Entregas que se guardan para consultarlas (las pendientes no se borran nunca)
+    webhook_retention_days: int = field(default_factory=lambda: _int("WEBHOOK_RETENTION_DAYS", "30"))
+    # Receptores de la red interna permitidos (nombres separados por comas). Solo ellos pueden
+    # resolver a una dirección privada o usar http; el resto, solo https a direcciones públicas
+    webhook_private_hosts: str = field(default_factory=lambda: _env("WEBHOOK_PRIVATE_HOSTS"))
+    # Tiempo real (WebSocket): cada cuánto se vuelve a comprobar la sesión de quien escucha
+    realtime_recheck_seconds: float = field(default_factory=lambda: _float("REALTIME_RECHECK_SECONDS", "30"))
+
     # --- Comprobaciones de salud: tiempo máximo por dependencia
     health_timeout_seconds: float = field(default_factory=lambda: _float("HEALTH_TIMEOUT_SECONDS", "2"))
 
@@ -106,6 +125,10 @@ class Settings:
         if self.auth_cookie_secure == "auto":
             return self.is_production
         return self.auth_cookie_secure == "true"
+
+    @property
+    def webhook_private_host_set(self) -> frozenset[str]:
+        return frozenset(h.strip().lower() for h in self.webhook_private_hosts.split(",") if h.strip())
 
     @property
     def database_url(self) -> str:

@@ -24,11 +24,13 @@ import structlog
 from redis.exceptions import RedisError
 from sqlalchemy import and_, func, or_, select
 
+from .. import events
 from ..errors import QuotaExceeded, RateLimited, Unavailable
 from ..limits import (ADMIT_LUA, SETTLE_LUA, Window, counter_key, estimate_tokens, from_units, to_units,
                       ttl_seconds, window)
 from ..models import AuditLog, AuditStatus, LimitMetric, LimitPeriod, LimitScope, UsageLimit
 from ..models.base import utcnow
+from ..telemetry import QUOTA_REJECTIONS
 from .context import Deps, PipelineContext
 
 log = structlog.get_logger(__name__)
@@ -158,6 +160,7 @@ def _reject(ctx: PipelineContext, counter: Counter, now: datetime):
     log.warning("quota.rejected", request_id=ctx.request_id, limit_id=counter.limit_id, scope=counter.scope,
                 scope_id=counter.scope_id, metric=counter.metric, period=counter.period,
                 application=ctx.identity.application_slug)
+    QUOTA_REJECTIONS.labels(str(counter.scope), str(counter.metric), str(counter.period)).inc()
     message = f"Límite de {what} de {_SCOPE_NAMES[counter.scope]} alcanzado ({shown})"
     if counter.is_rate:
         retry = 1 if counter.window.end is None else max(1, int((counter.window.end - now).total_seconds()) + 1)
@@ -209,7 +212,7 @@ async def run(ctx: PipelineContext, deps: Deps) -> None:
     try:
         for counter in counters:
             if counter.metric == LimitMetric.REQUESTS:
-                await _alert(deps, counter, counter.value)
+                await _alert(deps, ctx, counter, counter.value)
     except (RedisError, OSError) as exc:
         log.warning("quota.alert_failed", request_id=ctx.request_id, error_type=type(exc).__name__)
 
@@ -224,17 +227,22 @@ def _delta(counter: Counter, ctx: PipelineContext, real_tokens: int) -> int:
     return 0
 
 
-async def _alert(deps: Deps, counter: Counter, value: int) -> None:
-    """Avisa en el log, una vez por ventana, al pasar el umbral de aviso y al agotar el límite."""
+async def _alert(deps: Deps, ctx: PipelineContext, counter: Counter, value: int) -> None:
+    """Avisa, una vez por ventana, al pasar el umbral de aviso y al agotar el límite: en el log,
+    en tiempo real y a los webhooks suscritos (G12)."""
     if counter.is_rate or counter.limit <= 0:
         return
-    for threshold, event in ((100, "quota.exhausted"), (counter.alert_pct, "quota.alert")):
+    for threshold, event in ((100, events.QUOTA_EXHAUSTED), (counter.alert_pct, events.QUOTA_ALERT)):
         if value * 100 >= counter.limit * threshold:
             if await deps.redis.set(f"{counter.key}:alert:{threshold}", 1, ex=counter.ttl, nx=True):
-                log.warning(event, limit_id=counter.limit_id, scope=counter.scope, scope_id=counter.scope_id,
-                            subject=counter.subject, metric=counter.metric, period=counter.period,
-                            used=str(from_units(counter.metric, value)),
-                            limit=str(from_units(counter.metric, counter.limit)), threshold_pct=threshold)
+                data = {"limit_id": counter.limit_id, "scope": str(counter.scope), "scope_id": counter.scope_id,
+                        "subject": counter.subject, "metric": str(counter.metric), "period": str(counter.period),
+                        "used": str(from_units(counter.metric, value)),
+                        "limit": str(from_units(counter.metric, counter.limit)), "threshold_pct": threshold,
+                        "window_end": counter.window.end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "application": ctx.identity.application_slug}
+                log.warning(event, **data)
+                await events.emit(deps, event, organization_id=ctx.identity.organization_id, data=data)
             return
 
 
@@ -260,6 +268,6 @@ async def settle(ctx: PipelineContext, deps: Deps) -> None:
                                        *[d for _, d in pending])
         for (counter, _), value in zip(pending, values, strict=True):
             if int(value) >= 0:
-                await _alert(deps, counter, int(value))
+                await _alert(deps, ctx, counter, int(value))
     except (RedisError, OSError) as exc:
         log.error("quota.settle_failed", request_id=ctx.request_id, error_type=type(exc).__name__)

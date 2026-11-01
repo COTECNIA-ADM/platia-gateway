@@ -11,14 +11,16 @@ primer evento, un corte ya no se puede reintentar sin duplicar texto. Los evento
 reenvía `app.streaming`.
 """
 from collections.abc import Awaitable, Callable
+from time import perf_counter
 
 import structlog
 
-from .. import cooldown
+from .. import cooldown, events
 from ..contracts import anthropic_to_openai_response, native_contract, openai_to_anthropic_response, usage_of
 from ..errors import GatewayError
 from ..models import Contract
 from ..providers import open_stream, send
+from ..telemetry import UPSTREAM_ERRORS
 from .context import Deps, PipelineContext
 
 log = structlog.get_logger(__name__)
@@ -34,18 +36,28 @@ async def _with_fallback(ctx: PipelineContext, deps: Deps, call: Callable[[], Aw
         ctx.model, ctx.target = candidate.model, candidate.target
         ctx.upstream_body, ctx.hide_usage_chunk = candidate.body, candidate.hide_usage_chunk
         ctx.attempts = index + 1
+        started = perf_counter()
         try:
             result = await call()
         except GatewayError as exc:
+            ctx.upstream_seconds += perf_counter() - started
+            UPSTREAM_ERRORS.labels(candidate.target.provider_slug, exc.kind).inc()
             if not exc.fallback:
                 raise
-            await cooldown.record_failure(deps.redis, deps.settings, candidate.target.deployment_id, exc)
+            cooled = await cooldown.record_failure(deps.redis, deps.settings, candidate.target.deployment_id, exc)
+            if cooled is not None:
+                # Aviso para quien opera el gateway (webhooks globales y panel), uno por despliegue y ventana
+                await events.emit(deps, events.DEPLOYMENT_COOLED, organization_id=None, data={
+                    "deployment_id": candidate.target.deployment_id, "provider": candidate.target.provider_slug,
+                    "model": candidate.model.key, "seconds": cooled[0], "reason": cooled[1]},
+                    dedupe=str(candidate.target.deployment_id))
             last_error = exc
             if index + 1 < len(ctx.candidates):
                 log.warning("route.fallback", request_id=ctx.request_id, model=candidate.model.key,
                             deployment_id=candidate.target.deployment_id, provider=candidate.target.provider_slug,
                             error_type=exc.kind, status=exc.status)
             continue
+        ctx.upstream_seconds += perf_counter() - started
         await cooldown.record_success(deps.redis, candidate.target.deployment_id)
         return result
     raise last_error

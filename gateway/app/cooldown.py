@@ -40,22 +40,25 @@ async def _cool(redis, deployment_id: int, seconds: int, reason: str) -> None:
     log.warning("deployment.cooled", deployment_id=deployment_id, seconds=seconds, reason=reason)
 
 
-async def record_failure(redis, settings: Settings, deployment_id: int, error: GatewayError) -> None:
+async def record_failure(redis, settings: Settings, deployment_id: int, error: GatewayError) -> tuple[int, str] | None:
+    """Apunta el fallo. Si el despliegue se enfría ahora, devuelve los segundos y el motivo (para avisar)."""
     if redis is None:
-        return
+        return None
     try:
         if error.rate_limited:
             seconds = int(min(error.retry_after or settings.cooldown_seconds, settings.cooldown_max_seconds))
             await _cool(redis, deployment_id, seconds, "rate_limit")
-            return
+            return seconds, "rate_limit"
         key = _FAILURES.format(deployment_id)
         count = await redis.incr(key)
         if count == 1:
             await redis.expire(key, settings.cooldown_window_seconds)
         if count >= settings.cooldown_failures:
             await _cool(redis, deployment_id, settings.cooldown_seconds, error.kind)
+            return settings.cooldown_seconds, error.kind
     except (RedisError, OSError) as exc:
         log.warning("cooldown.unavailable", error_type=type(exc).__name__)
+    return None
 
 
 async def record_success(redis, deployment_id: int) -> None:
