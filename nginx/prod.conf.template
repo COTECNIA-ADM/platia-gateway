@@ -1,0 +1,42 @@
+# Proxy inverso en producción (G15, ADR-019): solo HTTPS.
+# La imagen oficial de Nginx sustituye las variables SERVER_NAME y HTTPS_PORT al arrancar (envsubst)
+# y deja intactas las variables propias de Nginx como $host.
+#
+# Va en el mismo servidor que PLATIA, que ya usa los puertos 80 y 443: el gateway publica
+# HTTPS en HTTPS_PORT (8443 por defecto) con su propio nombre (SERVER_NAME). PLATIA no pasa por
+# aquí: llama al gateway por la red interna platia_llm_net.
+#
+# TLS adaptado de machinebooks.ai/ES/aigateway/cap-33/block-06 (MIT).
+# Certificado en /etc/nginx/certs: fullchain.pem y privkey.pem (docs/despliegue.md).
+
+include /etc/nginx/snippets/http.conf;
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${SERVER_NAME};
+
+    ssl_certificate /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    # Configuración «intermedia» de Mozilla: TLS 1.2 y 1.3, cifrados con secreto hacia delante
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:PLATIA_TLS:10m;
+    ssl_session_tickets off;
+
+    # Quien llama por HTTP a este puerto va a la dirección HTTPS
+    error_page 497 =301 https://$host:${HTTPS_PORT}$request_uri;
+
+    set $gateway_upstream http://gateway:8000;
+    set $hsts "max-age=31536000";
+
+    include /etc/nginx/snippets/locations.conf;
+}
+
+# Un nombre que no es el del gateway no recibe nada (ni siquiera el certificado correcto)
+server {
+    listen 443 ssl default_server;
+    ssl_reject_handshake on;
+}

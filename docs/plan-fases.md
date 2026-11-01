@@ -2,7 +2,7 @@
 
 Cada fase es un PR revisable con tests en la CI y una prueba en Docker. El bloque A
 termina con PLATIA usando el gateway; los bloques B a D añaden control sin tocar PLATIA.
-Alcance acordado: bloques A y B (G0–G9, hechos) y después el bloque C (G10–G14, hecho).
+Alcance acordado: bloques A y B (G0–G9, hechos) después el bloque C (G10–G14) y el D (G15), todos hechos.
 
 | # | Fase | Qué se construye | Capítulos | Estado |
 | --- | --- | --- | --- | --- |
@@ -21,7 +21,7 @@ Alcance acordado: bloques A y B (G0–G9, hechos) y después el bloque C (G10–
 | G12 | Telemetría | Métricas de Prometheus, tiempo propio del gateway (RNF-06), avisos por webhook firmado y tiempo real por WebSocket (ADR-016) | 24 | Hecha |
 | G13 | Panel de administración | API `/admin/*` con papeles y registro de cambios (G13a, ADR-017) y app React: operaciones, proveedores y routing, cuotas, firewall, auditoría (G13b) | 27–29 | Hecha |
 | G14 | Portal de usuario | Cuenta, seguridad, claves (con rotación) y consumo propios en `/portal/` (ADR-018) | 30–31 | Hecha |
-| G15 | Despliegue y operación | Compose de producción, Nginx endurecido, Celery, GHCR, copias y restauración | 33–34 | Más adelante |
+| G15 | Despliegue y operación | Compose de producción con HTTPS en el servidor de PLATIA, Nginx endurecido, worker de tareas de fondo (sin Celery), GHCR, despliegue con vuelta atrás, copias y restauración (ADR-019) | 33–34 | Hecha |
 
 Fuera del núcleo, para más adelante si hacen falta: embeddings, imágenes y audio (cap. 10),
 búsqueda web y extracción de documentos (cap. 11), cola y RAG propios (cap. 12; PLATIA ya

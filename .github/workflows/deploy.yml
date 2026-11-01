@@ -1,0 +1,58 @@
+# Despliegue a producción (G15, ADR-019): manual, con aprobación y vuelta atrás automática.
+#
+# Necesita en GitHub (Settings > Environments > production):
+# - Revisores obligatorios: alguien aprueba cada despliegue antes de que empiece.
+# - Secretos: DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY (clave privada solo para desplegar)
+#   y DEPLOY_KNOWN_HOSTS (la huella del servidor, para no fiarse de la primera conexión).
+# Son los mismos que usa PLATIA si el gateway va en su servidor. Guía en docs/despliegue.md.
+# Adaptado de cotecnia-adm/platia-dev (.github/workflows/deploy.yml).
+name: Despliegue
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versión a desplegar (sha-xxxxxxx). Vacío: el último commit de main"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Versión
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}  # por variable: nunca dentro del script
+        run: |
+          v="$INPUT_VERSION"
+          if [ -z "$v" ]; then v="sha-${GITHUB_SHA::7}"; fi
+          if ! [[ "$v" =~ ^sha-[0-9a-f]{7}$ ]]; then echo "Versión no válida: $v"; exit 1; fi
+          echo "value=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Clave SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      - name: Desplegar
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            "cd /opt/platia-gateway && git fetch --quiet origin main && git checkout --quiet ${VERSION#sha-} && ./scripts/deploy.sh $VERSION"
+
+      - name: Borrar la clave
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

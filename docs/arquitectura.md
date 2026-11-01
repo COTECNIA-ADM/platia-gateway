@@ -20,6 +20,7 @@ flowchart LR
         G[gateway FastAPI]
     end
     subgraph data_net
+        W[worker: sellado y webhooks]
         M[(MySQL platia_gateway)]
         R[(Redis)]
     end
@@ -31,12 +32,19 @@ flowchart LR
     P -. red interna G5 .-> G2
     G --> M
     G --> R
+    W --> M
+    W --> R
+    W --> Z[Receptores de webhooks]
     G --> X[Anthropic]
     G --> Y[Proveedor compatible con OpenAI]
 ```
 
-- **edge_net**: Nginx y el gateway. Nginx es el único con puerto publicado.
-- **data_net**: el gateway, MySQL y Redis. Ninguno de los dos publica puertos.
+- **edge_net**: Nginx y el gateway. Nginx es el único con puerto publicado (8090 en
+  desarrollo; en producción, solo HTTPS en el 8443, porque el servidor es el de PLATIA).
+- **data_net**: el gateway, el worker, MySQL y Redis. MySQL y Redis no publican puertos.
+- **worker** (G15, [ADR-019](adr/ADR-019-despliegue-y-operacion.md)): la misma imagen que
+  el gateway con `python -m app.worker`; sella la auditoría y entrega los webhooks. La API
+  arranca con `BACKGROUND_TASKS=false`.
 - **llm_net** (G5): red Docker compartida con PLATIA para que `ai_service` llame al
   gateway sin salir del servidor. La crea el `docker-compose.yml` del gateway con el nombre
   fijo `platia_llm_net` (alias del gateway: `platia-gateway`); PLATIA la declara externa en

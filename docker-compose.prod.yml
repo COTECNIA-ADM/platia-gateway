@@ -1,0 +1,57 @@
+# Producción (G15, ADR-019). Se usa SIEMPRE junto al compose base:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-build
+#
+# Diferencias con desarrollo:
+# - Imágenes ya construidas por GitHub Actions (GATEWAY_VERSION = sha-xxxxxxx), sin compilar
+#   en el servidor.
+# - GATEWAY_ENV=production: el gateway y el worker no arrancan con una configuración insegura.
+# - Solo HTTPS, en HTTPS_PORT (8443): el servidor es el de PLATIA, que ya usa el 80 y el 443.
+# - Logs con rotación: ningún contenedor llena el disco.
+# El despliegue lo hace scripts/deploy.sh (guía en docs/despliegue.md).
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+x-gateway-image: &gateway-image ${REGISTRY:-ghcr.io/cotecnia-adm/platia-gateway}/gateway:${GATEWAY_VERSION:?Pon GATEWAY_VERSION (sha-xxxxxxx) en .env o usa scripts/deploy.sh}
+
+x-prod-env: &prod-env
+  GATEWAY_ENV: production
+  AUTH_COOKIE_SECURE: "true"
+  LOG_FORMAT: json
+
+services:
+  mysql:
+    logging: *logging
+  redis:
+    logging: *logging
+
+  migrations:
+    image: *gateway-image
+    environment: *prod-env
+    logging: *logging
+  gateway:
+    image: *gateway-image
+    environment: *prod-env
+    logging: *logging
+  worker:
+    image: *gateway-image
+    environment: *prod-env
+    logging: *logging
+
+  nginx:
+    image: ${REGISTRY:-ghcr.io/cotecnia-adm/platia-gateway}/nginx:${GATEWAY_VERSION}
+    ports: !override
+      - "${HTTPS_PORT:-8443}:443"
+    environment:
+      SERVER_NAME: ${SERVER_NAME:?Pon SERVER_NAME en .env (el nombre del gateway, p. ej. gateway.tuempresa.es)}
+      HTTPS_PORT: ${HTTPS_PORT:-8443}
+      # La plantilla de producción sustituye a la configuración de desarrollo (nginx/Dockerfile)
+      NGINX_ENVSUBST_TEMPLATE_DIR: /etc/nginx/prod
+    # Sin la configuración de desarrollo montada: la de la imagen, más el certificado
+    volumes: !override
+      - ${CERTS_DIR:-./certs}:/etc/nginx/certs:ro
+    logging: *logging

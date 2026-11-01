@@ -20,6 +20,17 @@ def _float(name: str, default: str) -> float:
     return float(os.environ.get(name, default))
 
 
+# Secretos generados (JWT, token de métricas): al menos esto en producción
+MIN_SECRET_LENGTH = 32
+# Restos de plantillas o ejemplos que nunca deben llegar a producción
+_PLACEHOLDERS = ("change-me", "changeme", "cambiar", "cambia-esto", "secret-key", "your-secret", "ejemplo", "example")
+
+
+def _placeholder(value: str) -> bool:
+    lowered = value.lower()
+    return any(p in lowered for p in _PLACEHOLDERS)
+
+
 @dataclass(frozen=True)
 class Settings:
     # development | production. En producción no se publica la documentación OpenAPI.
@@ -109,6 +120,12 @@ class Settings:
     # Tiempo real (WebSocket): cada cuánto se vuelve a comprobar la sesión de quien escucha
     realtime_recheck_seconds: float = field(default_factory=lambda: _float("REALTIME_RECHECK_SECONDS", "30"))
 
+    # Sellado y entregas en el proceso de la API (true) o solo en el proceso aparte
+    # `python -m app.worker` (false; es lo que hace el compose, G15)
+    background_tasks: bool = field(default_factory=lambda: _env("BACKGROUND_TASKS", "true") == "true")
+    # Fichero que el proceso de tareas de fondo toca cada poco: su healthcheck mira la fecha
+    worker_heartbeat_file: str = field(default_factory=lambda: _env("WORKER_HEARTBEAT_FILE", "/tmp/worker-heartbeat"))
+
     # --- Comprobaciones de salud: tiempo máximo por dependencia
     health_timeout_seconds: float = field(default_factory=lambda: _float("HEALTH_TIMEOUT_SECONDS", "2"))
 
@@ -119,6 +136,37 @@ class Settings:
     @property
     def is_production(self) -> bool:
         return self.env == "production"
+
+    def production_problems(self) -> list[str]:
+        """Lo que no se admite en producción (G15, ADR-019). Los mensajes nombran la variable,
+        nunca su valor. Idea de machinebooks.ai/ES/aigateway/cap-34/block-10 y block-11 (MIT)."""
+        if not self.is_production:
+            return []
+        problems = []
+        if not self.encryption_key:
+            problems.append("ENCRYPTION_KEY es obligatoria")
+        if len(self.jwt_secret) < MIN_SECRET_LENGTH or _placeholder(self.jwt_secret):
+            problems.append(f"JWT_SECRET debe ser aleatoria y de al menos {MIN_SECRET_LENGTH} caracteres")
+        if self.metrics_token and (len(self.metrics_token) < MIN_SECRET_LENGTH or _placeholder(self.metrics_token)):
+            problems.append(f"METRICS_TOKEN, si se pone, debe ser aleatorio y de al menos {MIN_SECRET_LENGTH} caracteres")
+        if not self.db_password or _placeholder(self.db_password):
+            problems.append("DB_PASSWORD es obligatoria")
+        if self.db_user == "root":
+            problems.append("DB_USER no puede ser root: el gateway usa su propio usuario")
+        if not self.redis_password or _placeholder(self.redis_password):
+            problems.append("REDIS_PASSWORD es obligatoria")
+        if self.auth_cookie_secure == "false":
+            problems.append("AUTH_COOKIE_SECURE=false no se admite: la sesión solo viaja por HTTPS")
+        if not self.require_mfa_for_admins:
+            problems.append("REQUIRE_MFA_FOR_ADMINS=false no se admite: administrar exige MFA")
+        if self.log_format != "json":
+            problems.append("LOG_FORMAT debe ser json")
+        return problems
+
+    def check_production(self) -> None:
+        problems = self.production_problems()
+        if problems:
+            raise RuntimeError("Configuración no válida en producción: " + "; ".join(problems))
 
     @property
     def cookie_secure(self) -> bool:

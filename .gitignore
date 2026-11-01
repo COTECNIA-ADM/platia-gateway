@@ -21,3 +21,8 @@ dist/
 .vscode/
 .idea/
 .DS_Store
+
+# Producción (G15): copias de seguridad, certificados y estado del despliegue
+backups/
+certs/
+.deploy/

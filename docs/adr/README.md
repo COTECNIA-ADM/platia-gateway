@@ -23,3 +23,4 @@ descartaron. Para cambiar una decisión se escribe un ADR nuevo que sustituya al
 | [016](ADR-016-telemetria.md) | Telemetría con Prometheus, avisos por webhook firmado en cola de MySQL y eventos en tiempo real por WebSocket | Aceptado |
 | [017](ADR-017-api-del-panel.md) | API del panel: solo administradores con MFA y de su organización, catálogo para operadores y registro de cambios | Aceptado |
 | [018](ADR-018-portal-de-usuario.md) | Portal de usuario: solo lo propio, rotación de claves con margen y un solo build con el panel | Aceptado |
+| [019](ADR-019-despliegue-y-operacion.md) | Despliegue y operación: worker propio sin Celery, solo HTTPS en el servidor de PLATIA, Nginx endurecido y copias de MySQL | Aceptado |
