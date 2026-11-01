@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Prueba en Docker del contrato de inferencia (G3), del streaming (G4) y de la reserva (G6),
-# repetible y sin coste.
+# Prueba en Docker del contrato de inferencia (G3), del streaming (G4), de la reserva (G6) y
+# de las cuotas (G7), repetible y sin coste.
 #
 # Requisito: la plataforma levantada (docker compose up -d --build --wait).
 # Uso:       bash scripts/prueba_docker.sh
@@ -9,7 +9,9 @@
 # organización, una aplicación, una clave, el proveedor y dos modelos (uno de cada familia)
 # y llama al gateway a través de Nginx por los dos contratos, con y sin streaming. Si los SDK
 # de Anthropic y OpenAI están instalados (pip install anthropic openai), los prueba también
-# (scripts/prueba_sdk.py). Cada ejecución usa nombres nuevos: se puede repetir sin limpiar.
+# (scripts/prueba_sdk.py). Las cuotas se prueban con otra aplicación y, al final, parando
+# Redis un momento para ver que con límites se falla cerrado. Cada ejecución usa nombres
+# nuevos: se puede repetir sin limpiar.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -52,6 +54,12 @@ cli create-deployment --model "doble-$RUN" --provider "anthropic-$RUN" --upstrea
 cli create-model --key "roto-$RUN" --name "Saturado" --family anthropic --fallback "gpt-$RUN"
 cli create-deployment --model "roto-$RUN" --provider "anthropic-$RUN" --upstream saturado
 KEY="$(cli create-key --org "$RUN" --app platia --label prueba | tail -n 1)"
+# Cuotas (G7): otra aplicación, con un límite por minuto para «rafa» y un presupuesto diario
+# para «ana» (cada llamada a claude-$RUN cuesta 0,006 USD)
+cli create-app --org "$RUN" --team equipo --slug cuotas --name Cuotas --trusted
+cli set-limit --org "$RUN" --app cuotas --user rafa --metric requests --period minute --value 2
+cli set-limit --org "$RUN" --app cuotas --user ana --metric cost_usd --period day --value 0.01
+QKEY="$(cli create-key --org "$RUN" --app cuotas --label cuotas | tail -n 1)"
 
 check() { # descripción, código esperado, respuesta (código en la última línea)
   local code="${3##*$'\n'}"
@@ -127,6 +135,28 @@ else
   SDK_CALLS=0
 fi
 
+echo "== Cuotas y límites de ritmo"
+quota_call() { # persona → cabeceras y código en la última línea
+  curl -s -o /dev/null -D - -w '%{http_code}' "$BASE/v1/messages" -H "x-api-key: $QKEY" -H "X-Platia-User-Id: $1" \
+    -d "{\"model\":\"claude-$RUN\",\"max_tokens\":50,\"messages\":[{\"role\":\"user\",\"content\":\"Hola\"}]}"
+}
+second=$(date -u +%S)
+[ $((10#$second)) -lt 50 ] || sleep $((61 - 10#$second))  # las tres llamadas, en el mismo minuto
+check "Límite por minuto: 1.ª llamada" 200 "$(quota_call rafa)"
+check "Límite por minuto: 2.ª llamada" 200 "$(quota_call rafa)"
+out="$(quota_call rafa)"
+check "Límite por minuto: 3.ª llamada → 429" 429 "$out"
+grep -qi "^retry-after: [0-9]" <<<"$out"
+out="$(quota_call ana)"
+check "Presupuesto diario: 1.ª llamada" 200 "$out"
+grep -qi "x-platia-budget-remaining-usd: 0.010000" <<<"$out"
+check "Presupuesto diario: 2.ª llamada (gastado 0,006 < 0,01)" 200 "$(quota_call ana)"
+out="$(quota_call ana)"
+check "Presupuesto diario agotado → 402" 402 "$out"
+grep -qi "x-platia-quota-reset: .*T00:00:00Z" <<<"$out"
+check "Otra persona sin límites sigue" 200 "$(quota_call luis)"
+cli limits | tail -n 2  # los de esta ejecución son los últimos
+
 echo "== Errores"
 out="$(curl -s -w '\n%{http_code}' "$BASE/v1/messages" -d '{}')"
 check "Sin clave → 401" 401 "$out"
@@ -167,4 +197,17 @@ if [ "$ok" != "$expected_ok" ] || [ "$blocked" != 1 ] || [ "$other" != 0 ] || [ 
   echo "FALLO: auditoría (se esperaban $expected_ok correctas, 1 bloqueada y ninguna pendiente)"; exit 1
 fi
 echo "ok: cada llamada auditada, también las de streaming; sin texto de la conversación"
+
+echo "== Cuotas con Redis parado: falla cerrado"
+docker compose stop redis >/dev/null 2>&1
+out="$(quota_call ana)"
+code_ana="${out##*$'\n'}"
+out="$(quota_call luis)"
+code_luis="${out##*$'\n'}"
+docker compose start redis >/dev/null 2>&1
+docker compose up -d --wait redis >/dev/null 2>&1
+[ "$code_ana" = 503 ] || { echo "FALLO: con límites y sin Redis se esperaba 503 (recibido $code_ana)"; exit 1; }
+echo "ok: con límites y sin Redis → 503"
+[ "$code_luis" = 200 ] || { echo "FALLO: sin límites y sin Redis se esperaba 200 (recibido $code_luis)"; exit 1; }
+echo "ok: sin límites no hace falta Redis → 200"
 echo "== Prueba superada"

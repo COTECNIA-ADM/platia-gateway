@@ -13,7 +13,7 @@ from ..contracts import check_basics
 from ..errors import GatewayError, InternalError, InvalidRequest, RequestTooLarge, Unavailable, error_response
 from ..models import Contract
 from ..streaming import streaming_response
-from . import audit, auth, execute, policy, route
+from . import audit, auth, execute, policy, quota, route
 from .context import Deps, PipelineContext
 
 log = structlog.get_logger(__name__)
@@ -56,6 +56,7 @@ async def run_inference(request: Request, contract: Contract):
         ctx.requested_model = check_basics(ctx.body)
         ctx.stream = bool(ctx.body.get("stream", False))
         await policy.run(ctx, deps)
+        await quota.run(ctx, deps)
         await route.run(ctx, deps)
         await audit.open_record(ctx, deps)
         if ctx.stream:
@@ -74,12 +75,15 @@ async def run_inference(request: Request, contract: Contract):
         log.exception("pipeline.unexpected", request_id=ctx.request_id)
         ctx.error = InternalError("Error interno del gateway")
     finally:
-        if upstream is None and not ctx.finished:
-            if ctx.error is None:
-                # Cancelada a mitad (cliente desconectado o apagado): también se registra
-                ctx.error = GatewayError("Petición cancelada", status=499, kind="cancelled")
+        if upstream is None:
             with anyio.CancelScope(shield=True):
-                await audit.close(ctx, deps)
+                if not ctx.finished:
+                    if ctx.error is None:
+                        # Cancelada a mitad (cliente desconectado o apagado): también se registra
+                        ctx.error = GatewayError("Petición cancelada", status=499, kind="cancelled")
+                    await audit.close(ctx, deps)
+                # Con streaming, los contadores los ajusta el generador al terminar
+                await quota.settle(ctx, deps)
 
     if ctx.error is not None:
         log.info("request.failed", request_id=ctx.request_id, contract=contract, status=ctx.error.status,
@@ -99,4 +103,5 @@ async def run_inference(request: Request, contract: Contract):
         "X-Platia-Attempts": str(ctx.attempts),
         "X-Platia-Cost-Usd": f"{ctx.cost_usd:.8f}",
         "X-Platia-Latency-Ms": str(ctx.elapsed_ms()),
+        **(ctx.quota.headers if ctx.quota else {}),
     })

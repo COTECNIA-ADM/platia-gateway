@@ -44,7 +44,7 @@ def alembic_config(connection) -> Config:
 # --- Base de datos con datos de partida y proveedores simulados
 
 KEY_B64 = base64.urlsafe_b64encode(b"k" * 32).decode()
-TABLES = ["audit_logs", "api_keys", "model_prices", "deployments", "llm_models", "providers", "applications",
+TABLES = ["usage_limits", "audit_logs", "api_keys", "model_prices", "deployments", "llm_models", "providers", "applications",
           "users", "teams", "organizations"]
 
 ANTHROPIC_REPLY = {"id": "msg_up", "type": "message", "role": "assistant", "model": "claude-upstream",

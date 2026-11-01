@@ -81,7 +81,8 @@ describe 14 etapas; este gateway empieza con 8 y las demás se añaden si hacen 
 | 1 | `auth` | Clave → aplicación o persona → equipo → organización activa; persona y propósito declarados | Se rechaza (401) | G3 |
 | 2 | `security_input` | Jailbreak, marcas de clasificación, secretos | Reglas por defecto en memoria; nunca se salta | G8 |
 | 3 | `filter` | Datos personales: detectar y tachar según la política | Reglas por defecto en memoria | G8 |
-| 4 | `policy` | Modelo final permitido para esa clave y propósito; cuota y límites | Se rechaza (402, 403 o 429) | G3, G7 |
+| 4 | `policy` | Modelo final permitido para esa clave y propósito | Se rechaza (403 o 404) | G3 |
+| 4b | `quota` | Cuotas de gasto, peticiones y tokens por periodo; límites por minuto y de simultáneas | Con límites y sin Redis, se rechaza (503); si no, 402 o 429 | G7 |
 | 5 | `route` | Despliegue y adaptador del proveedor | Se rechaza (503) | G3, G6 |
 | 6 | `execute` | Llamada al proveedor con tiempo máximo y cadena de reserva | Siguiente de la cadena; si no queda, 502 | G3, G6 |
 | 7 | `security_output` | Filtro de salida, también por trozos en streaming | Se corta la respuesta | G8 |
@@ -93,7 +94,8 @@ desconecta a mitad de un streaming (bloque `finally`).
 
 **En el código** (G3, [ADR-007](adr/ADR-007-contrato-y-pipeline-minimo.md)): cada etapa es
 un módulo de `gateway/app/pipeline/` y `runner.py` fija el orden: `auth` → `policy` →
-`route` → apertura de `audit` → `execute` → cierre de `audit`. Los contratos y su
+`quota` (G7) → `route` → apertura de `audit` → `execute` → cierre de `audit` y ajuste de
+`quota`. Los contratos y su
 traducción están en `contracts.py`, los adaptadores en `providers.py` y las rutas en
 `api.py`. Los 401 no se registran en `audit_logs` (solo en el log), para que una clave
 falsa no pueda escribir en la base.
@@ -111,9 +113,17 @@ el fallo sea del destino (429, 5xx, sin respuesta) y no de la petición (400). L
 despliegues que fallan se enfrían en Redis (`cooldown.py`) y pasan al final de la lista.
 La auditoría guarda los intentos y el destino que respondió.
 
+**Cuotas y límites** (G7, [ADR-011](adr/ADR-011-cuotas-y-limites.md)): `quota` reúne los
+límites de `usage_limits` que tocan a la petición (organización, equipo, aplicación y
+persona) y, con un guion Lua, comprueba y sube a la vez sus contadores en Redis. Gasto,
+peticiones o tokens de día o de mes agotados: 402; por minuto o simultáneas: 429. Al
+terminar, `quota.settle` suma el coste y los tokens reales y libera la simultánea. Los
+contadores de día y de mes se reconstruyen desde la auditoría si faltan.
+
 **Etapas del libro que no entran ahora**: ganchos corporativos antes y después del chat
 (con los webhooks de G12), caché exacta y semántica (G11, opcional), contexto RAG (PLATIA
-ya lo tiene), recorte del historial y control previo de ventana (se reconsideran en G7).
+ya lo tiene), recorte del historial y control previo de ventana (descartados en G7: el proveedor ya rechaza
+lo que no cabe, con un 400 que el gateway devuelve tal cual).
 
 ## Identidad
 
@@ -183,6 +193,7 @@ erDiagram
     providers ||--o{ deployments : sirve
     llm_models ||--o{ deployments : "se despliega en"
     llm_models ||--o{ model_prices : "precio desde"
+    organizations ||--o{ usage_limits : "límites de"
 ```
 
 | Tabla | Qué guarda | Fase en que se usa |
@@ -192,7 +203,8 @@ erDiagram
 | `api_keys` | Hash y prefijo de cada clave, caducidad y revocación | G3 |
 | `providers` | Cuentas de proveedor con la clave cifrada (AES-256-GCM) | G3 |
 | `llm_models`, `deployments` | Modelos, sus funciones y dónde se sirven, con peso y prioridad | G3, G6 |
-| `model_prices` | USD por millón de tokens desde una fecha, incluida la caché | G7 |
+| `model_prices` | USD por millón de tokens desde una fecha, incluida la caché | G3, G7 |
+| `usage_limits` | Cuotas y límites de ritmo por ámbito, métrica y periodo | G7 |
 | `audit_logs` | Una fila por petición: quién, qué, resultado, tokens, coste, hashes | G3, G9 |
 
 `audit_logs` no tiene claves foráneas, para sobrevivir a cambios en la configuración.

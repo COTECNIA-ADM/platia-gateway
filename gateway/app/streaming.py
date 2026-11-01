@@ -26,7 +26,7 @@ from .contracts import (STOP_TO_ANTHROPIC, STOP_TO_OPENAI, Usage, merge_anthropi
                         usage_from_openai)
 from .errors import GatewayError, UpstreamFailed, UpstreamTimeout
 from .models import Contract
-from .pipeline import audit
+from .pipeline import audit, quota
 from .pipeline.context import Deps, PipelineContext
 from .providers import sanitize
 
@@ -293,6 +293,7 @@ async def relay_stream(ctx: PipelineContext, deps: Deps, upstream: httpx.Respons
         with anyio.CancelScope(shield=True):
             await upstream.aclose()
             await audit.close(ctx, deps)
+            await quota.settle(ctx, deps)
         ctx.finished = True
         log.info("request.streamed", request_id=ctx.request_id, contract=ctx.contract, model=ctx.model.key,
                  provider=ctx.target.provider_slug, status=ctx.error.status if ctx.error else 200,
@@ -305,6 +306,7 @@ def streaming_response(ctx: PipelineContext, deps: Deps, upstream: httpx.Respons
         "X-Request-ID": ctx.request_id,
         "X-Platia-Model-Used": ctx.model.key,
         "X-Platia-Attempts": str(ctx.attempts),
+        **(ctx.quota.headers if ctx.quota else {}),
         "Cache-Control": "no-cache",
         # Que Nginx no acumule la respuesta: cada evento sale en cuanto llega
         "X-Accel-Buffering": "no",

@@ -175,3 +175,60 @@ def test_cadena_de_reserva_y_despliegues(settings, capsys, engine, world):
             "claude-test", "gpt-test"]
     code, out, _ = _run(settings, capsys, "set-deployment", "--id", str(deployment.id), "--active")
     assert out.strip().endswith("activo") and "inactivo" not in out
+
+
+def test_limites_por_cli(settings, capsys, client, world):
+    def run(*argv):
+        return _run(settings, capsys, *argv)
+
+    code, out, _ = run("set-limit", "--org", "cotecnia", "--metric", "cost_usd", "--period", "month", "--value", "50")
+    assert code == 0 and "organización cotecnia, cost_usd month = 50" in out
+    code, out, _ = run("set-limit", "--org", "cotecnia", "--metric", "cost_usd", "--period", "month", "--value", "80",
+                       "--alert-pct", "90")
+    assert code == 0 and "actualizado" in out  # mismo ámbito, métrica y periodo: se cambia, no se duplica
+    assert run("set-limit", "--org", "cotecnia", "--team", "plataforma", "--metric", "requests", "--period", "minute",
+               "--value", "60")[0] == 0
+    assert run("set-limit", "--org", "cotecnia", "--app", "platia", "--metric", "concurrent", "--value", "4")[0] == 0
+    code, out, _ = run("set-limit", "--org", "cotecnia", "--app", "platia", "--user", "", "--metric", "requests",
+                       "--period", "day", "--value", "100")
+    assert code == 0 and "cada persona de platia" in out
+    code, out, _ = run("set-limit", "--org", "cotecnia", "--app", "platia", "--user", "7", "--metric", "cost_usd",
+                       "--period", "day", "--value", "2")
+    assert code == 0 and "persona 7 de platia" in out
+
+    assert client.post("/v1/messages", json={"model": "claude-test", "max_tokens": 10,
+                                             "messages": [{"role": "user", "content": "Hola"}]},
+                       headers={"x-api-key": world.keys["platia"], "X-Platia-User-Id": "7"}).status_code == 200
+    capsys.readouterr()  # los logs de la petición
+    code, out, _ = run("limits")
+    assert code == 0
+    lines = out.strip().splitlines()
+    assert len(lines) == 5
+    assert "organización cotecnia: cost_usd month ≤ 80 (aviso 90 %) · usado 0.011100" in lines[0]
+    assert any("equipo plataforma: requests minute ≤ 60" in line and "usado" not in line for line in lines)
+    assert any("persona 7 de platia: cost_usd day ≤ 2 (aviso 80 %) · usado 0.011100" in line for line in lines)
+    assert any("personas de platia: requests day ≤ 100" in line and "usado" not in line for line in lines)
+
+    limit_id = lines[0].split("]")[0].strip("[")
+    assert run("remove-limit", "--id", limit_id)[0] == 0
+    assert len(run("limits")[1].strip().splitlines()) == 4
+    assert run("remove-limit", "--id", limit_id)[0] == 1  # ya no existe
+
+
+def test_limites_por_cli_errores(settings, capsys, client):
+    def error(*argv):
+        code, _, err = _run(settings, capsys, *argv)
+        assert code == 1
+        return err
+
+    assert "No hay límites" in _run(settings, capsys, "limits")[1]
+    assert "Falta --period" in error("set-limit", "--org", "cotecnia", "--metric", "requests", "--value", "1")
+    assert "por día o por mes" in error("set-limit", "--org", "cotecnia", "--metric", "cost_usd", "--period", "minute",
+                                        "--value", "1")
+    assert "--alert-pct" in error("set-limit", "--org", "cotecnia", "--metric", "tokens", "--period", "minute",
+                                  "--value", "1", "--alert-pct", "0")
+    assert "--user necesita --app" in error("set-limit", "--org", "cotecnia", "--user", "7", "--metric", "requests",
+                                            "--period", "day", "--value", "1")
+    assert "no los dos" in error("set-limit", "--org", "cotecnia", "--team", "plataforma", "--app", "platia",
+                                 "--metric", "requests", "--period", "day", "--value", "1")
+    assert "No existe" in error("set-limit", "--org", "nadie", "--metric", "requests", "--period", "day", "--value", "1")

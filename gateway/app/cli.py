@@ -6,9 +6,9 @@ Uso dentro de Docker (el contenedor de migraciones tiene acceso a MySQL):
 
 Órdenes: create-org, create-team, create-app, create-key, revoke-key, create-provider,
 create-model, set-fallbacks (cadena de reserva), create-deployment, set-deployment
-(prioridad, peso o estado), set-price, show y usage (consumo y coste, para compararlo con lo
-que registra PLATIA). `python -m app.cli <orden> -h`
-explica cada una.
+(prioridad, peso o estado), set-price, set-limit, remove-limit y limits (cuotas y límites de
+ritmo, G7), show y usage (consumo y coste, para compararlo con lo que registra PLATIA).
+`python -m app.cli <orden> -h` explica cada una.
 
 La clave de un proveedor nunca va como argumento (quedaría en el historial de la shell):
 se lee de una variable de entorno (`--api-key-env`) o de la entrada estándar. La clave de
@@ -28,8 +28,10 @@ from sqlalchemy.orm import Session
 
 from .crypto import encrypt, load_key
 from .keys import new_application_key
-from .models import (ApiKey, Application, ApplicationStatus, AuditLog, AuditStatus, Deployment, KeyKind, LlmModel, ModelFamily, ModelPrice,
-                     Organization, Provider, ProviderKind, Team)
+from .limits import window
+from .models import (ApiKey, Application, ApplicationStatus, AuditLog, AuditStatus, Deployment, KeyKind,
+                     LimitMetric, LimitPeriod, LimitScope, LlmModel, ModelFamily, ModelPrice, Organization, Provider,
+                     ProviderKind, Team, UsageLimit)
 from .models.base import utcnow
 from .settings import Settings
 
@@ -209,6 +211,101 @@ def set_price(db: Session, args, settings: Settings) -> None:
     _out(f"Precio de '{model.model_key}' desde {since:%Y-%m-%d %H:%M}: {args.input} / {args.output} USD por Mtok")
 
 
+def _limit_scope(db: Session, args) -> tuple[LimitScope, int, str | None, str]:
+    """Ámbito del límite según las opciones: --user (con --app), --app, --team o solo --org."""
+    org = _org(db, args.org)
+    if args.user is not None and not args.app:
+        raise CliError("--user necesita --app: la persona es la que declara esa aplicación")
+    if args.app and args.team:
+        raise CliError("Usa --team o --app, no los dos")
+    if args.app:
+        app = _one(db, Application, organization_id=org.id, slug=args.app, deleted_at=None)
+        if args.user is not None:
+            subject = args.user or None  # --user '' = cada persona de la aplicación
+            label = f"persona {subject} de {app.slug}" if subject else f"cada persona de {app.slug}"
+            return LimitScope.END_USER, app.id, subject, label
+        return LimitScope.APPLICATION, app.id, None, f"aplicación {app.slug}"
+    if args.team:
+        team = _one(db, Team, organization_id=org.id, slug=args.team, deleted_at=None)
+        return LimitScope.TEAM, team.id, None, f"equipo {team.slug}"
+    return LimitScope.ORGANIZATION, org.id, None, f"organización {org.slug}"
+
+
+def set_limit(db: Session, args, settings: Settings) -> None:
+    metric = args.metric
+    if metric == LimitMetric.CONCURRENT:
+        period = LimitPeriod.NONE
+    elif args.period is None or args.period == LimitPeriod.NONE:
+        raise CliError("Falta --period (minute, day o month)")
+    elif metric == LimitMetric.COST_USD and args.period == LimitPeriod.MINUTE:
+        raise CliError("El gasto se limita por día o por mes")
+    else:
+        period = args.period
+    if not 1 <= args.alert_pct <= 100:
+        raise CliError("--alert-pct va de 1 a 100")
+    scope, scope_id, subject, label = _limit_scope(db, args)
+    existing = db.execute(select(UsageLimit).where(
+        UsageLimit.scope == scope, UsageLimit.scope_id == scope_id, UsageLimit.metric == metric,
+        UsageLimit.period == period, UsageLimit.deleted_at.is_(None),
+        UsageLimit.subject.is_(None) if subject is None else UsageLimit.subject == subject)).scalars().first()
+    if existing is None:
+        existing = UsageLimit(scope=scope, scope_id=scope_id, subject=subject, metric=metric, period=period,
+                              limit_value=args.value, alert_pct=args.alert_pct)
+        db.add(existing)
+        verb = "creado"
+    else:
+        existing.limit_value, existing.alert_pct, existing.is_active = args.value, args.alert_pct, True
+        verb = "actualizado"
+    db.flush()
+    _out(f"Límite {existing.id} {verb}: {label}, {metric} {period} = {args.value} (aviso al {args.alert_pct} %)")
+
+
+def remove_limit(db: Session, args, settings: Settings) -> None:
+    limit = _one(db, UsageLimit, id=args.id, deleted_at=None)
+    limit.deleted_at, limit.is_active = utcnow(), False
+    _out(f"Límite {limit.id} eliminado")
+
+
+def _used(db: Session, limit: UsageLimit) -> Decimal | None:
+    """Lo consumido en el periodo actual según la auditoría (día y mes; minuto y simultáneas, no)."""
+    if limit.period not in (LimitPeriod.DAY, LimitPeriod.MONTH):
+        return None
+    column = {LimitScope.ORGANIZATION: AuditLog.organization_id, LimitScope.TEAM: AuditLog.team_id}.get(
+        limit.scope, AuditLog.application_id)
+    where = [column == limit.scope_id, AuditLog.created_at >= window(limit.period, utcnow()).start,
+             AuditLog.status != AuditStatus.BLOCKED]
+    if limit.scope == LimitScope.END_USER and limit.subject:
+        where.append(AuditLog.end_user_ref == limit.subject)
+    measure = {LimitMetric.COST_USD: func.sum(AuditLog.cost_usd), LimitMetric.REQUESTS: func.count(),
+               LimitMetric.TOKENS: func.sum(AuditLog.input_tokens + AuditLog.output_tokens
+                                            + AuditLog.cache_read_tokens + AuditLog.cache_write_tokens)}
+    return Decimal(db.execute(select(measure[limit.metric]).where(*where)).scalar() or 0)
+
+
+def limits(db: Session, args, settings: Settings) -> None:
+    names = {LimitScope.ORGANIZATION: (Organization, "organización"), LimitScope.TEAM: (Team, "equipo"),
+             LimitScope.APPLICATION: (Application, "aplicación"), LimitScope.END_USER: (Application, "personas de")}
+    rank = list(LimitScope)  # de lo más amplio (organización) a lo más concreto (persona)
+    rows = sorted(db.execute(select(UsageLimit).where(UsageLimit.deleted_at.is_(None))).scalars(),
+                  key=lambda r: (rank.index(r.scope), r.scope_id, r.id))
+    if not rows:
+        _out("No hay límites: el gateway no limita el gasto ni el ritmo")
+        return
+    for limit in rows:
+        model, word = names[limit.scope]
+        owner = db.get(model, limit.scope_id)
+        who = f"{word} {owner.slug if owner else limit.scope_id}"
+        if limit.subject:
+            who = f"persona {limit.subject} de {owner.slug if owner else limit.scope_id}"
+        used = _used(db, limit)
+        # En las personas generales, el consumo es de todas juntas: solo orientativo
+        shown = "" if used is None or (limit.scope == LimitScope.END_USER and not limit.subject) else \
+            f" · usado {used:.6f}" if limit.metric == LimitMetric.COST_USD else f" · usado {int(used)}"
+        state = "" if limit.is_active else " (inactivo)"
+        _out(f"[{limit.id}] {who}: {limit.metric} {limit.period} ≤ {limit.limit_value.normalize():f}"
+             f" (aviso {limit.alert_pct} %){shown}{state}")
+
+
 def show(db: Session, args, settings: Settings) -> None:
     for org in db.execute(select(Organization).where(Organization.deleted_at.is_(None))).scalars():
         _out(f"Organización {org.slug} ({'activa' if org.is_active else 'inactiva'})")
@@ -354,6 +451,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cache-write", type=_decimal)
     p.add_argument("--since", help="Fecha ISO en UTC (por defecto, ahora)")
     p.set_defaults(handler=set_price)
+
+    p = sub.add_parser("set-limit", help="Crear o cambiar una cuota o un límite de ritmo (G7)")
+    p.add_argument("--org", required=True)
+    p.add_argument("--team", help="Límite del equipo")
+    p.add_argument("--app", help="Límite de la aplicación")
+    p.add_argument("--user", help="Con --app: límite de esa persona (X-Platia-User-Id); '' para cada persona")
+    p.add_argument("--metric", required=True, type=LimitMetric, choices=list(LimitMetric),
+                   help="cost_usd (USD), requests, tokens o concurrent (peticiones simultáneas)")
+    p.add_argument("--period", type=LimitPeriod, choices=[LimitPeriod.MINUTE, LimitPeriod.DAY, LimitPeriod.MONTH],
+                   help="minute, day o month (UTC); concurrent no lleva")
+    p.add_argument("--value", required=True, type=_decimal)
+    p.add_argument("--alert-pct", type=int, default=80, help="Aviso en el log al pasar este porcentaje")
+    p.set_defaults(handler=set_limit)
+
+    p = sub.add_parser("remove-limit", help="Quitar un límite (id en 'limits')")
+    p.add_argument("--id", required=True, type=int)
+    p.set_defaults(handler=remove_limit)
+
+    p = sub.add_parser("limits", help="Límites configurados y consumo del periodo actual")
+    p.set_defaults(handler=limits)
 
     p = sub.add_parser("show", help="Resumen de organizaciones, aplicaciones y modelos")
     p.set_defaults(handler=show)
