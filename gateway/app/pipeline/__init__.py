@@ -4,5 +4,6 @@ Cada etapa es una función ``run(ctx, deps)`` que lee y escribe el contexto comp
 puede cortar la petición lanzando un `GatewayError`. Ninguna etapa llama a otra: el orden
 lo fija `runner.py`.
 
-Etapas en G3: auth → policy → route → audit (apertura) → execute → audit (cierre).
+Orden actual: auth → security_input → filter → policy → quota → route → audit (apertura) →
+execute → security_output → audit (cierre).
 """

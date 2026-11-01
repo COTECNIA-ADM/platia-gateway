@@ -49,6 +49,10 @@ class PermissionDenied(GatewayError):
     status, kind = 403, "permission_error"
 
 
+class ContentBlocked(PermissionDenied):
+    """La política de contenido no deja pasar la petición o la respuesta (G8)."""
+
+
 class NotFound(GatewayError):
     status, kind = 404, "not_found_error"
 

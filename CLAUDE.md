@@ -23,7 +23,8 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
   (vacía y recrea la base: nunca una con datos)
 - Alta de configuración (hasta el panel, G13): `docker compose run --rm migrations python -m app.cli <orden>`
   (`create-org`, `create-app`, `create-key`, `create-provider`, `create-model`, `create-deployment`,
-  `set-price`, `set-fallbacks`, `set-deployment`, `set-limit`, `remove-limit`, `limits`, `revoke-key`,
+  `set-price`, `set-fallbacks`, `set-deployment`, `set-limit`, `remove-limit`, `limits`,
+  `set-content-policy`, `content-policies`, `revoke-key`,
   `show`, `usage`; `--exists-ok` para
   guiones que se repiten)
 - Prueba en Docker sin coste (con la plataforma levantada): `bash scripts/prueba_docker.sh`
@@ -59,6 +60,9 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
 - Cuotas (ADR-011): la etapa `quota` admite con un guion Lua (todo o nada) y `quota.settle`
   ajusta con el uso real allí donde se cierra la auditoría. Los contadores de día y mes se
   reconstruyen desde `audit_logs`; con límites y sin Redis, se rechaza (503).
+- Contenido (ADR-012): detectores en `app/content.py` (deterministas, sin llamar a otro modelo)
+  y acción por casilla en `content_policies`. Nunca se guarda ni se registra el texto
+  encontrado; solo categoría, tipo y recuento en `security_flags`.
 - Cada fase llega en un PR con tests, `ruff` y cobertura en verde, y una prueba en Docker
   que se pueda repetir.
 - No exponer MySQL ni Redis fuera de `data_net`. Nginx solo publica las rutas que tocan.

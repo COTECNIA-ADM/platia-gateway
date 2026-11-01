@@ -13,7 +13,8 @@ from ..contracts import check_basics
 from ..errors import GatewayError, InternalError, InvalidRequest, RequestTooLarge, Unavailable, error_response
 from ..models import Contract
 from ..streaming import streaming_response
-from . import audit, auth, execute, policy, quota, route
+from ..content_policy import header as content_header
+from . import audit, auth, execute, filter, policy, quota, route, security_input, security_output
 from .context import Deps, PipelineContext
 
 log = structlog.get_logger(__name__)
@@ -55,6 +56,8 @@ async def run_inference(request: Request, contract: Contract):
         ctx.body = await read_json(request, deps.settings.max_body_bytes)
         ctx.requested_model = check_basics(ctx.body)
         ctx.stream = bool(ctx.body.get("stream", False))
+        await security_input.run(ctx, deps)
+        await filter.run(ctx, deps)
         await policy.run(ctx, deps)
         await quota.run(ctx, deps)
         await route.run(ctx, deps)
@@ -64,6 +67,7 @@ async def run_inference(request: Request, contract: Contract):
             upstream = await execute.open_upstream_stream(ctx, deps)
         else:
             await execute.run(ctx, deps)
+            await security_output.run(ctx, deps)
             await audit.close(ctx, deps)
             ctx.finished = True
     except GatewayError as exc:
@@ -88,6 +92,7 @@ async def run_inference(request: Request, contract: Contract):
     if ctx.error is not None:
         log.info("request.failed", request_id=ctx.request_id, contract=contract, status=ctx.error.status,
                  error_type=ctx.error.kind, application=ctx.identity.application_slug if ctx.identity else None)
+        ctx.error.headers = {**ctx.error.headers, **content_header(ctx)}
         return error_response(contract, ctx.error, ctx.request_id)
 
     if upstream is not None:
@@ -104,4 +109,5 @@ async def run_inference(request: Request, contract: Contract):
         "X-Platia-Cost-Usd": f"{ctx.cost_usd:.8f}",
         "X-Platia-Latency-Ms": str(ctx.elapsed_ms()),
         **(ctx.quota.headers if ctx.quota else {}),
+        **content_header(ctx),
     })

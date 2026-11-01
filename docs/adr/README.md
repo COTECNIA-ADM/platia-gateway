@@ -16,3 +16,4 @@ descartaron. Para cambiar una decisión se escribe un ADR nuevo que sustituya al
 | [009](ADR-009-conexion-platia.md) | Conexión con PLATIA por red interna, propósito libre, correlación por `X-Request-ID` y sin salto a la llamada directa | Aceptado |
 | [010](ADR-010-reserva-y-enfriamiento.md) | Reserva entre despliegues y modelos permitidos, con enfriamiento pasivo en Redis | Aceptado |
 | [011](ADR-011-cuotas-y-limites.md) | Cuotas y límites de ritmo con contadores en Redis, ventanas naturales y la auditoría como respaldo | Aceptado |
+| [012](ADR-012-seguridad-de-contenido.md) | Seguridad de contenido con detectores locales y política por organización y aplicación | Aceptado |

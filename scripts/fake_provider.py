@@ -3,7 +3,9 @@
 
 Responde como Anthropic en `POST /v1/messages` y como OpenAI en
 `POST /v1/chat/completions`, siempre con el mismo texto, con o sin streaming (SSE). Para
-probar la reserva (G6), el modelo `caido` responde 503 y `saturado`, 429 con Retry-After. Exige la clave de
+probar la reserva (G6), el modelo `caido` responde 503 y `saturado`, 429 con Retry-After. Para
+la seguridad de contenido (G8), el modelo `eco` devuelve lo que recibió (en streaming, en
+trozos de 7 caracteres): así se ve qué llega al proveedor y qué filtra la salida. Exige la clave de
 `FAKE_PROVIDER_KEY` (en `x-api-key` o `Authorization: Bearer`), para comprobar que el
 gateway descifra y envía la del proveedor y no la del cliente. Solo biblioteca estándar.
 """
@@ -16,7 +18,12 @@ KEY = os.environ["FAKE_PROVIDER_KEY"]
 WORDS = ["Respuesta ", "simulada ", "en ", "streaming"]
 
 
-def anthropic_events(model: str) -> list[str]:
+def echo_of(request: dict) -> str:
+    content = (request.get("messages") or [{}])[-1].get("content")
+    return "Has escrito: " + (content if isinstance(content, str) else json.dumps(content, ensure_ascii=False))
+
+
+def anthropic_events(model: str, words: list[str] = WORDS) -> list[str]:
     def event(name, data):
         return f"event: {name}\ndata: {json.dumps(data)}\n\n"
     out = [event("message_start", {"type": "message_start", "message": {
@@ -26,7 +33,7 @@ def anthropic_events(model: str) -> list[str]:
                                          "content_block": {"type": "text", "text": ""}}),
            event("ping", {"type": "ping"})]
     out += [event("content_block_delta", {"type": "content_block_delta", "index": 0,
-                                          "delta": {"type": "text_delta", "text": w}}) for w in WORDS]
+                                          "delta": {"type": "text_delta", "text": w}}) for w in words]
     return out + [event("content_block_stop", {"type": "content_block_stop", "index": 0}),
                   event("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn",
                                                                              "stop_sequence": None},
@@ -78,13 +85,18 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("content-length", "0")
             self.end_headers()
         elif self.path == "/v1/messages" and request.get("stream"):
-            self._stream(anthropic_events(request.get("model")))
+            words = WORDS
+            if request.get("model") == "eco":
+                text = echo_of(request)
+                words = [text[i:i + 7] for i in range(0, len(text), 7)]
+            self._stream(anthropic_events(request.get("model"), words))
         elif self.path == "/v1/chat/completions" and request.get("stream"):
             include = bool((request.get("stream_options") or {}).get("include_usage"))
             self._stream(openai_events(request.get("model"), include))
         elif self.path == "/v1/messages":
             self._reply(200, {"id": "msg_fake", "type": "message", "role": "assistant", "model": request.get("model"),
-                              "content": [{"type": "text", "text": "Respuesta simulada de Anthropic"}],
+                              "content": [{"type": "text", "text": echo_of(request) if request.get("model") == "eco"
+                                           else "Respuesta simulada de Anthropic"}],
                               "stop_reason": "end_turn", "usage": {"input_tokens": 1000, "output_tokens": 200}})
         elif self.path == "/v1/chat/completions":
             self._reply(200, {"id": "chatcmpl-fake", "object": "chat.completion", "model": request.get("model"),

@@ -22,10 +22,13 @@ import httpx
 import structlog
 from fastapi.responses import StreamingResponse
 
+from .content import TextGuard, find, tally
+from .content_policy import flag
+from .content_policy import header as content_header
 from .contracts import (STOP_TO_ANTHROPIC, STOP_TO_OPENAI, Usage, merge_anthropic_usage, native_contract,
                         usage_from_openai)
-from .errors import GatewayError, UpstreamFailed, UpstreamTimeout
-from .models import Contract
+from .errors import ContentBlocked, GatewayError, UpstreamFailed, UpstreamTimeout
+from .models import ContentAction, ContentCheck, Contract, Direction
 from .pipeline import audit, quota
 from .pipeline.context import Deps, PipelineContext
 from .providers import sanitize
@@ -255,16 +258,138 @@ def relay_for(ctx: PipelineContext) -> Relay:
     return OpenAIToAnthropic(ctx.model.key, ctx.request_id)
 
 
+# --- Filtro de la salida (G8, ADR-012)
+
+class OutputFilter:
+    """Aplica la política de salida a los eventos que van al cliente, ya en su contrato.
+
+    Solo con `log` los eventos salen tal cual y el texto se revisa al final. Con `redact` o
+    `block`, el texto de cada bloque pasa por un `TextGuard`: se reescriben los eventos de
+    texto con lo que ya se puede enviar y el resto sale al cerrar el bloque. Con `block`, al
+    encontrar algo se corta la respuesta: lo retenido no llega al cliente.
+    """
+    CHECKS = (ContentCheck.SECRET, ContentCheck.PII)
+
+    def __init__(self, ctx: PipelineContext):
+        self.ctx = ctx
+        actions = {c: ctx.content_actions.get((Direction.OUTPUT, c), ContentAction.OFF) for c in self.CHECKS}
+        self.actions = actions
+        self.checks = {c for c, a in actions.items() if a != ContentAction.OFF}
+        self.block = {c for c, a in actions.items() if a == ContentAction.BLOCK}
+        self.rewrite = bool(self.block or any(a == ContentAction.REDACT for a in actions.values()))
+        redact_checks = {c for c, a in actions.items() if a == ContentAction.REDACT}
+        self.guards: dict[int, TextGuard] = {}
+        self.new_guard = lambda: TextGuard(self.checks, redact_checks)
+        self.seen: list[str] = []  # sin reescritura: el texto, para revisarlo al final
+        self.anthropic_index = 0
+        self.openai_base: dict = {}
+
+    def _guard(self, index: int) -> TextGuard:
+        return self.guards.setdefault(index, self.new_guard())
+
+    def _checked(self, guard: TextGuard, before: int, text: str) -> str:
+        if any(f.check in self.block for f in guard.found[before:]):
+            raise ContentBlocked("La respuesta del modelo contenía datos que la política de contenido no permite "
+                                 "enviar; se ha cortado")
+        return text
+
+    def _feed(self, index: int, text: str) -> str:
+        guard = self._guard(index)
+        before = len(guard.found)
+        return self._checked(guard, before, guard.feed(text))
+
+    def _flush(self, index: int) -> str:
+        guard = self.guards.get(index)
+        if guard is None:
+            return ""
+        before = len(guard.found)
+        return self._checked(guard, before, guard.flush())
+
+    def process(self, out: str) -> list[str]:
+        if not self.checks:
+            return [out]
+        event = _block(out.rstrip("\n").split("\n"))
+        if self.ctx.contract == Contract.ANTHROPIC:
+            return self._anthropic(event, out)
+        return self._openai(event, out)
+
+    def _anthropic(self, event: Event, out: str) -> list[str]:
+        payload = event.json() or {}
+        delta = payload.get("delta") if isinstance(payload.get("delta"), dict) else {}
+        if event.name == "content_block_delta" and delta.get("type") == "text_delta":
+            text = delta.get("text") or ""
+            if not self.rewrite:
+                self.seen.append(text)
+                return [out]
+            self.anthropic_index = payload.get("index", 0)
+            safe = self._feed(self.anthropic_index, text)
+            if not safe:
+                return []
+            return [anthropic_event("content_block_delta", {**payload, "delta": {**delta, "text": safe}})]
+        if self.rewrite and event.name in ("content_block_stop", "message_delta", "message_stop"):
+            index = payload.get("index", self.anthropic_index) if event.name == "content_block_stop" \
+                else self.anthropic_index
+            rest = self._flush(index)
+            if rest:
+                return [anthropic_event("content_block_delta", {"type": "content_block_delta", "index": index,
+                                                                "delta": {"type": "text_delta", "text": rest}}), out]
+        return [out]
+
+    def _openai(self, event: Event, out: str) -> list[str]:
+        chunk = None if event.data == DONE else event.json()
+        if chunk is None:
+            return [*self._openai_flush_all(), out] if self.rewrite else [out]
+        self.openai_base = {k: chunk[k] for k in ("id", "object", "created", "model") if k in chunk}
+        before: list[str] = []
+        changed = False
+        for choice in chunk.get("choices") or []:
+            if not isinstance(choice, dict):
+                continue
+            delta = choice.get("delta") if isinstance(choice.get("delta"), dict) else {}
+            index = choice.get("index", 0)
+            if isinstance(delta.get("content"), str):
+                if not self.rewrite:
+                    self.seen.append(delta["content"])
+                else:
+                    delta["content"] = self._feed(index, delta["content"])
+                    changed = True
+            if self.rewrite and choice.get("finish_reason"):
+                rest = self._flush(index)
+                if rest:
+                    before.append(self._openai_text(index, rest))
+        if not changed:
+            return [*before, out]
+        return [*before, openai_event(chunk)]
+
+    def _openai_text(self, index: int, text: str) -> str:
+        return openai_event({**self.openai_base, "choices": [{"index": index, "delta": {"content": text},
+                                                              "finish_reason": None}]})
+
+    def _openai_flush_all(self) -> list[str]:
+        return [self._openai_text(i, rest) for i in list(self.guards) if (rest := self._flush(i))]
+
+    def finish(self) -> None:
+        """Anota lo encontrado en la salida (también si la respuesta se cortó)."""
+        if not self.checks:
+            return
+        findings = [f for g in self.guards.values() for f in g.found] if self.rewrite \
+            else find("".join(self.seen), self.checks)
+        for check, kinds in tally(findings).items():
+            flag(self.ctx, Direction.OUTPUT, ContentCheck(check), self.actions[ContentCheck(check)], kinds)
+
+
 # --- El generador que alimenta la respuesta
 
 async def relay_stream(ctx: PipelineContext, deps: Deps, upstream: httpx.Response) -> AsyncIterator[bytes]:
     relay = relay_for(ctx)
+    output_filter = OutputFilter(ctx)
     deadline = perf_counter() + deps.settings.stream_max_seconds
     try:
         try:
             async for event in sse_events(upstream):
                 for out in relay.feed(event):
-                    yield out.encode("utf-8")
+                    for piece in output_filter.process(out):
+                        yield piece.encode("utf-8")
                 if relay.done:
                     break
                 if perf_counter() > deadline:
@@ -284,6 +409,7 @@ async def relay_stream(ctx: PipelineContext, deps: Deps, upstream: httpx.Respons
                 yield out.encode("utf-8")
     finally:
         ctx.usage = relay.usage
+        output_filter.finish()
         if relay.error is not None and ctx.error is None:
             ctx.error = relay.error
         if not relay.done and ctx.error is None:
@@ -307,6 +433,7 @@ def streaming_response(ctx: PipelineContext, deps: Deps, upstream: httpx.Respons
         "X-Platia-Model-Used": ctx.model.key,
         "X-Platia-Attempts": str(ctx.attempts),
         **(ctx.quota.headers if ctx.quota else {}),
+        **content_header(ctx),  # lo encontrado en la entrada; lo de la salida, en la auditoría
         "Cache-Control": "no-cache",
         # Que Nginx no acumule la respuesta: cada evento sale en cuanto llega
         "X-Accel-Buffering": "no",
