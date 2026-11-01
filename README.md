@@ -159,11 +159,18 @@ resumen de uso. El catálogo de proveedores y modelos lo cambia solo quien opera
 (`cli set-user --operator si`). Cada cambio queda registrado. Rutas en
 [docs/panel.md](docs/panel.md) y decisiones en [ADR-017](docs/adr/ADR-017-api-del-panel.md).
 
+## Portal de usuario
+
+Cada persona tiene su portal en http://localhost:8090/portal/: su consumo (por día y por
+modelo, sus cuotas y sus últimas peticiones), sus claves personales (crear, rotar con unas
+horas de margen y revocar, con cómo configurar Claude Code o los SDK) y su cuenta
+(contraseña, MFA y sesiones). Nunca ve datos de otras personas. Rutas en
+[docs/portal.md](docs/portal.md) y decisiones en [ADR-018](docs/adr/ADR-018-portal-de-usuario.md).
+
 ## Personas y claves personales
 
-Las personas entran con contraseña y una app autenticadora (TOTP) en `/auth/login`; el panel
-y el portal llegan en G13 y G14. Un administrador tiene que activar el MFA antes de hacer
-nada más. Las claves personales (`plgw-usr-…`, para Claude Code o scripts) siguen las reglas
+Las personas entran con contraseña y una app autenticadora (TOTP) en `/auth/login`. Un
+administrador tiene que activar el MFA antes de hacer nada más. Las claves personales (`plgw-usr-…`, para Claude Code o scripts) siguen las reglas
 de la aplicación marcada con `--personal-keys`.
 
 ```bash

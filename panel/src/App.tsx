@@ -27,7 +27,7 @@ export function App() {
       <main className="login">
         <section className="card login-card">
           <h1>Sin acceso al panel</h1>
-          <p>El panel es para administradores. Tus claves y tu consumo estarán en el portal de usuario.</p>
+          <p>El panel es para administradores. Tus claves y tu consumo están en tu <a href="/portal/">portal</a>.</p>
           <button className="btn" onClick={() => void logout()}>
             Salir
           </button>
@@ -35,7 +35,7 @@ export function App() {
       </main>
     )
   return (
-    <Shell>
+    <Shell link={<a className="small" href="/portal/">Mi portal</a>}>
       <Routes>
         <Route path="/" element={<Navigate to="/overview" replace />} />
         <Route path="/overview" element={<Overview />} />

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Prueba en Docker del contrato de inferencia (G3), del streaming (G4), de la reserva (G6),
 # de las cuotas (G7), de la seguridad de contenido (G8), de la auditoría (G9), de la
-# identidad de personas (G10), de la caché (G11), de la telemetría (G12) y de la API del panel
-# (G13), repetible y sin coste.
+# identidad de personas (G10), de la caché (G11), de la telemetría (G12), de la API del panel
+# (G13) y del portal de usuario (G14), repetible y sin coste.
 #
 # Requisito: la plataforma levantada (docker compose up -d --build --wait).
 # Uso:       bash scripts/prueba_docker.sh
@@ -494,5 +494,49 @@ panel="$(curl -s -D - "$BASE/panel/auditoria-filtrada?status=error")"
 grep -q "^HTTP/1.1 200" <<<"$panel" && grep -qi "content-security-policy: default-src 'none'; script-src 'self'" <<<"$panel" \
   && grep -q '<div id="root">' <<<"$panel" || { echo "FALLO: Nginx no sirve el panel con su política de contenido"; exit 1; }
 echo "ok: Nginx sirve el panel en /panel/ (también sus rutas) con una política de contenido estricta"
+
+echo "== Portal de usuario (G14), a través de Nginx"
+MEMBER_EMAIL="leo@$RUN.test"
+cli create-user --org "$RUN" --email "$MEMBER_EMAIL" --name Leo --role member
+printf '%s\n' "$PERSON_PASSWORD" | cli set-password --org "$RUN" --email "$MEMBER_EMAIL"
+mtoken="$(curl -s "$BASE/auth/login" -H 'content-type: application/json' \
+  -d "{\"email\":\"$MEMBER_EMAIL\",\"password\":\"$PERSON_PASSWORD\"}" | gw_json '["access_token"]')"
+me_api() { # método, ruta, [cuerpo]; deja el código en la última línea
+  curl -s -w '\n%{http_code}' -X "$1" "$BASE/me/$2" -H "Authorization: Bearer $mtoken" \
+    -H 'content-type: application/json' ${3:+-d "$3"}
+}
+out="$(me_api GET portal)"
+check "Portal de una persona sin MFA (no administra)" 200 "$out"
+grep -q "\"model\": *\"claude-$RUN\"" <<<"${out%$'\n'*}" || { echo "FALLO: el portal no enseña los modelos de las claves personales"; exit 1; }
+out="$(me_api POST keys '{"label":"portátil","expires_days":30}')"
+check "Clave personal desde el portal" 201 "$out"
+k1="$(gw_json '["key"]' <<<"${out%$'\n'*}")"
+k1_id="$(gw_json '["id"]' <<<"${out%$'\n'*}")"
+call() { curl -s -w '\n%{http_code}' "$BASE/v1/messages" -H "x-api-key: $1" -H 'content-type: application/json' -d "$ask"; }
+check "Llamada con la clave del portal" 200 "$(call "$k1")"
+out="$(me_api POST "keys/$k1_id/rotate" '{"expires_days":30,"grace_hours":1}')"
+check "Rotar con una hora de margen" 201 "$out"
+k2="$(gw_json '["key"]' <<<"${out%$'\n'*}")"
+k2_id="$(gw_json '["id"]' <<<"${out%$'\n'*}")"
+check "La clave anterior sigue valiendo durante el margen" 200 "$(call "$k1")"
+check "La clave nueva vale" 200 "$(call "$k2")"
+out="$(me_api POST "keys/$k2_id/rotate" '{"grace_hours":0}')"
+check "Rotar sin margen" 201 "$out"
+check "Sin margen, la anterior deja de valer → 401" 401 "$(call "$k2")"
+out="$(me_api GET 'usage?days=1')"
+check "Mi consumo" 200 "$out"
+mine="$(gw_json '["totals"]["requests"]' <<<"${out%$'\n'*}")"
+[ "$mine" = 3 ] || { echo "FALLO: el consumo propio debía ser 3 peticiones y es $mine"; exit 1; }
+out="$(me_api GET 'requests?limit=50')"
+check "Mis peticiones" 200 "$out"
+rows="$(gw_json '["data"].__len__()' <<<"${out%$'\n'*}")"
+[ "$rows" = 3 ] || { echo "FALLO: el portal enseña $rows peticiones y solo hay 3 propias"; exit 1; }
+echo "ok: el portal solo cuenta lo de la persona ($mine peticiones), aunque la organización tenga más"
+out="$(curl -s -w '\n%{http_code}' "$BASE/admin/overview" -H "Authorization: Bearer $mtoken")"
+check "Una persona sin rol de administración no entra al panel → 403" 403 "$out"
+portal="$(curl -s -D - "$BASE/portal/keys")"
+grep -q "^HTTP/1.1 200" <<<"$portal" && grep -qi "content-security-policy: default-src 'none'; script-src 'self'" <<<"$portal" \
+  && grep -q '/panel/assets/portal-' <<<"$portal" || { echo "FALLO: Nginx no sirve el portal con su política de contenido"; exit 1; }
+echo "ok: Nginx sirve el portal en /portal/ con la misma política de contenido que el panel"
 
 echo "== Prueba superada"

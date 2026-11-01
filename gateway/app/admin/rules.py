@@ -58,18 +58,20 @@ def _limit_body(limit: UsageLimit, label: str, used: Decimal | None) -> dict:
             "used": plain(used) if used is not None else None, "updated_at": iso(limit.updated_at)}
 
 
-async def _used(db, limit: UsageLimit) -> Decimal | None:
-    """Consumo del periodo actual según la auditoría (día y mes; el de minuto vive solo en Redis)."""
+async def used(db, limit: UsageLimit, subject: str | None = None) -> Decimal | None:
+    """Consumo del periodo actual según la auditoría (día y mes; el de minuto vive solo en Redis).
+    `subject` da el de una persona concreta en un límite de «cada persona» (portal, G14)."""
     if limit.period not in (LimitPeriod.DAY, LimitPeriod.MONTH):
         return None
-    if limit.scope == LimitScope.END_USER and not limit.subject:
+    subject = subject or limit.subject
+    if limit.scope == LimitScope.END_USER and not subject:
         return None  # el de cada persona por separado: no hay un único consumo
     column = {LimitScope.ORGANIZATION: AuditLog.organization_id, LimitScope.TEAM: AuditLog.team_id}.get(
         limit.scope, AuditLog.application_id)
     where = [column == limit.scope_id, AuditLog.created_at >= window(limit.period, utcnow()).start,
              AuditLog.status != AuditStatus.BLOCKED]
-    if limit.subject:
-        where.append(AuditLog.end_user_ref == limit.subject)
+    if subject:
+        where.append(AuditLog.end_user_ref == subject)
     measure = {LimitMetric.COST_USD: func.sum(AuditLog.cost_usd), LimitMetric.REQUESTS: func.count(),
                LimitMetric.TOKENS: func.sum(AuditLog.input_tokens + AuditLog.output_tokens
                                             + AuditLog.cache_read_tokens + AuditLog.cache_write_tokens)}
@@ -118,7 +120,7 @@ async def list_limits(request: Request, who: Principal = Depends(admin)):
         rows = (await db.execute(select(UsageLimit).where(UsageLimit.deleted_at.is_(None),
                                                           _org_filter(who.organization_id, teams, apps))
                                  .order_by(UsageLimit.id))).scalars().all()
-        return {"data": [_limit_body(r, _label(r, teams, apps), await _used(db, r)) for r in rows]}
+        return {"data": [_limit_body(r, _label(r, teams, apps), await used(db, r)) for r in rows]}
 
 
 @router.put("/limits")
@@ -159,7 +161,7 @@ async def set_limit(request: Request, body: LimitIn, who: Principal = Depends(ad
                                                                  "period": period})
         await commit(db)
         teams, apps = await _scopes(db, who.organization_id)
-        return _limit_body(existing, _label(existing, teams, apps), await _used(db, existing))
+        return _limit_body(existing, _label(existing, teams, apps), await used(db, existing))
 
 
 @router.patch("/limits/{limit_id}")
@@ -177,7 +179,7 @@ async def update_limit(request: Request, limit_id: int, body: LimitPatch, who: P
             limit.is_active = changes["is_active"]
         record(db, request, who, "limit.update", "limit", limit.id, changes)
         await commit(db)
-        return _limit_body(limit, _label(limit, teams, apps), await _used(db, limit))
+        return _limit_body(limit, _label(limit, teams, apps), await used(db, limit))
 
 
 @router.delete("/limits/{limit_id}", status_code=204)

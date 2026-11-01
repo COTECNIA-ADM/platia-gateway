@@ -9,7 +9,7 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
 ## Stack
 - **Gateway**: FastAPI asíncrono + SQLAlchemy 2 (aiomysql) — `gateway/`
 - **Datos**: MySQL 8.0 (base `platia_gateway`) y Redis 7
-- **Panel**: React 18 + TypeScript + Vite — `panel/`, compilado en la imagen de Nginx y servido en `/panel/`
+- **Panel y portal**: React 18 + TypeScript + Vite — `panel/` (portal en `src/portal/`), compilado en la imagen de Nginx y servido en `/panel/` y `/portal/`
 - **Proxy**: Nginx, único servicio con puerto publicado (8090) — `nginx/nginx.conf` y `nginx/Dockerfile`
 - **Redes Docker**: `edge_net` (Nginx ↔ gateway) y `data_net` (gateway ↔ MySQL/Redis)
 
@@ -91,7 +91,10 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
   que se da con la CLI. Cada cambio llama a `record(...)` antes de `commit` (misma
   transacción) y los secretos se registran como `(cambiado)`. Un secreto se enseña una vez,
   con `no-store`. Una ruta nueva va también en `docs/panel.md`.
-- Panel web (`panel/`): llamadas solo con `src/lib/api.ts`, datos con React Query, token en
+- Portal (ADR-018): rutas en `app/portal.py` (y `account_api.py`), siempre filtradas por la
+  persona de la sesión y sin aceptar otro id de persona; nunca cuotas ni consumo de equipo u
+  organización. Una ruta nueva va también en `docs/portal.md`.
+- Panel web y portal (`panel/`): llamadas solo con `src/lib/api.ts`, datos con React Query, token en
   memoria (nunca `localStorage` ni `sessionStorage`), nada de `dangerouslySetInnerHTML`,
   gráficos con vista de tabla, filtros en la URL y textos en español. Pruebas `*.test.tsx`
   junto a la pantalla con `mockApi` y `renderWithProviders`; `src/test/conventions.test.ts`

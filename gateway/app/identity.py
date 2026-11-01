@@ -43,6 +43,7 @@ MFA_TICKET_SECONDS = 300
 MFA_MAX_ATTEMPTS = 5
 SCOPE_FULL, SCOPE_SETUP = "full", "mfa_setup"
 PERSONAL_KEYS_PER_USER = 5
+ROTATION_MAX_GRACE_HOURS = 72
 PERSONAL_KEY_MAX_DAYS = 365
 BAD_CREDENTIALS = "Correo o contraseña incorrectos"
 SESSION_EXPIRED = "La sesión no es válida o ha caducado: vuelve a iniciar sesión"
@@ -481,3 +482,35 @@ async def revoke_key(deps: Deps, who: Principal, key_id: int) -> None:
     if not result.rowcount:
         raise InvalidRequest("No tienes ninguna clave activa con ese id")
     log.info("auth.key_revoked", user_id=who.user_id, key_id=key_id)
+
+
+async def rotate_key(deps: Deps, who: Principal, key_id: int, expires_days: int,
+                     grace_hours: int) -> tuple[ApiKey, str, ApiKey]:
+    """Clave nueva para sustituir otra sin cortar el servicio (G14): la anterior sigue valiendo
+    `grace_hours` horas, lo justo para cambiarla donde se use. Con 0, deja de valer ya."""
+    if not 1 <= expires_days <= PERSONAL_KEY_MAX_DAYS:
+        raise InvalidRequest(f"La caducidad debe estar entre 1 y {PERSONAL_KEY_MAX_DAYS} días")
+    if not 0 <= grace_hours <= ROTATION_MAX_GRACE_HOURS:
+        raise InvalidRequest(f"El margen debe estar entre 0 y {ROTATION_MAX_GRACE_HOURS} horas")
+    async with deps.sessions() as db, db.begin():
+        await db.get(User, who.user_id, with_for_update=True)
+        if await personal_application(db, who.organization_id) is None:
+            raise PermissionDenied("La organización no tiene activadas las claves personales")
+        old = (await db.execute(_active_keys(who.user_id).where(ApiKey.id == key_id))).scalar_one_or_none()
+        if old is None:
+            raise InvalidRequest("No tienes ninguna clave activa con ese id")
+        now = utcnow()
+        if grace_hours == 0:
+            old.revoked_at = now
+        else:
+            ends = now + timedelta(hours=grace_hours)
+            old.expires_at = min(old.expires_at, ends) if old.expires_at else ends
+        # La nueva ocupa el sitio de la anterior: no cuenta contra el máximo de claves
+        new = new_user_key()
+        key = ApiKey(organization_id=who.organization_id, kind=KeyKind.USER, user_id=who.user_id, prefix=new.prefix,
+                     key_hash=new.key_hash, label=old.label, created_by=who.user_id,
+                     expires_at=now + timedelta(days=expires_days))
+        db.add(key)
+        await db.flush()
+    log.info("auth.key_rotated", user_id=who.user_id, key_id=key_id, new_prefix=key.prefix)
+    return key, new.raw, old
