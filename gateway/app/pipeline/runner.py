@@ -14,7 +14,7 @@ from ..errors import GatewayError, InternalError, InvalidRequest, RequestTooLarg
 from ..models import Contract
 from ..streaming import streaming_response
 from ..content_policy import header as content_header
-from . import audit, auth, execute, filter, policy, quota, route, security_input, security_output
+from . import audit, auth, cache, execute, filter, policy, quota, route, security_input, security_output
 from .context import Deps, PipelineContext
 
 log = structlog.get_logger(__name__)
@@ -59,6 +59,14 @@ async def run_inference(request: Request, contract: Contract):
         await security_input.run(ctx, deps)
         await filter.run(ctx, deps)
         await policy.run(ctx, deps)
+        await cache.run(ctx, deps)
+        if ctx.cache_hit:
+            # Respuesta guardada (G11): ni cuota ni proveedor; sí filtro de salida y auditoría
+            await audit.open_record(ctx, deps)
+            await security_output.run(ctx, deps)
+            await audit.close(ctx, deps)
+            ctx.finished = True
+            return _response(ctx, contract)
         await quota.run(ctx, deps)
         await route.run(ctx, deps)
         await audit.open_record(ctx, deps)
@@ -67,6 +75,7 @@ async def run_inference(request: Request, contract: Contract):
             upstream = await execute.open_upstream_stream(ctx, deps)
         else:
             await execute.run(ctx, deps)
+            await cache.store(ctx, deps)
             await security_output.run(ctx, deps)
             await audit.close(ctx, deps)
             ctx.finished = True
@@ -98,11 +107,16 @@ async def run_inference(request: Request, contract: Contract):
     if upstream is not None:
         return streaming_response(ctx, deps, upstream)
 
+    return _response(ctx, contract)
+
+
+def _response(ctx: PipelineContext, contract: Contract) -> JSONResponse:
     log.info("request.completed", request_id=ctx.request_id, contract=contract,
              application=ctx.identity.application_slug, purpose=ctx.purpose, model=ctx.model.key,
-             provider=ctx.target.provider_slug, attempts=ctx.attempts, input_tokens=ctx.usage.input, output_tokens=ctx.usage.output,
-             cost_usd=str(ctx.cost_usd), latency_ms=ctx.elapsed_ms())
-    return JSONResponse(ctx.response_body, headers={
+             provider="cache" if ctx.cache_hit else ctx.target.provider_slug, attempts=ctx.attempts,
+             input_tokens=ctx.usage.input, output_tokens=ctx.usage.output, cost_usd=str(ctx.cost_usd),
+             latency_ms=ctx.elapsed_ms(), cache=ctx.cache_state)
+    headers = {
         "X-Request-ID": ctx.request_id,
         "X-Platia-Model-Used": ctx.model.key,
         "X-Platia-Attempts": str(ctx.attempts),
@@ -110,4 +124,7 @@ async def run_inference(request: Request, contract: Contract):
         "X-Platia-Latency-Ms": str(ctx.elapsed_ms()),
         **(ctx.quota.headers if ctx.quota else {}),
         **content_header(ctx),
-    })
+    }
+    if ctx.cache_state != "off":
+        headers["X-Platia-Cache"] = ctx.cache_state
+    return JSONResponse(ctx.response_body, headers=headers)

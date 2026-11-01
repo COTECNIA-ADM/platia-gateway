@@ -118,6 +118,21 @@ cli audit-pseudonymize --org cotecnia --user 7     # seudonimizarla sin romper l
 
 Detalles en [ADR-013](docs/adr/ADR-013-auditoria-verificable.md).
 
+## Caché de respuestas
+
+Una aplicación puede guardar sus respuestas para no pagar dos veces la misma petición (misma
+persona, mismo propósito, mismo cuerpo). Está desactivada por defecto, solo funciona sin
+streaming y la respuesta se guarda cifrada en Redis.
+
+```bash
+cli set-cache --org cotecnia --app platia --ttl 3600 --purpose document_summary
+cli set-cache --org cotecnia --app platia --ttl 0          # desactivarla
+cli cache-clear --org cotecnia --app platia                # vaciarla
+```
+
+Cada respuesta lleva `X-Platia-Cache: miss` o `hit`, y una petición se la salta con
+`X-Platia-Cache: no`. Detalles en [ADR-015](docs/adr/ADR-015-cache-exacta.md).
+
 ## Personas y claves personales
 
 Las personas entran con contraseña y una app autenticadora (TOTP) en `/auth/login`; el panel

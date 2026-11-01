@@ -43,6 +43,9 @@ class Identity:
     audit_salt: str = field(default="", repr=False)
     # Clave personal (G10): la persona dueña de la clave. Con clave de aplicación, None
     user_id: int | None = None
+    # Caché exacta de la aplicación (G11): segundos (0 = sin caché) y propósitos (None = todos)
+    cache_ttl_seconds: int = 0
+    cache_purposes: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -91,6 +94,10 @@ class PipelineContext:
     upstream_body: dict | None = None
     hide_usage_chunk: bool = False
     attempts: int = 0
+    # cache (G11): off, miss o hit; la clave solo si se puede guardar la respuesta
+    cache_state: str = "off"
+    cache_key: str | None = None
+    cache_hit: bool = False
     # execute
     response_body: dict | None = None
     usage: Usage = field(default_factory=Usage)

@@ -27,7 +27,7 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
   `set-price`, `set-fallbacks`, `set-deployment`, `set-limit`, `remove-limit`, `limits`,
   `set-content-policy`, `content-policies`, `audit-seal`, `audit-verify`, `audit-export`,
   `audit-pseudonymize`, `create-user`, `set-user`, `set-password`, `reset-mfa`,
-  `revoke-sessions`, `revoke-key`,
+  `revoke-sessions`, `set-cache`, `cache-clear`, `revoke-key`,
   `show`, `usage`; `--exists-ok` para
   guiones que se repiten)
 - Prueba en Docker sin coste (con la plataforma levantada): `bash scripts/prueba_docker.sh`
@@ -73,6 +73,9 @@ por fases pequeñas siguiendo *Anatomía de una Plataforma IA Corporativa*; el p
   el JWT de acceso es HS256 fijo y cada petición comprueba la sesión en MySQL. La renovación
   va en cookie HttpOnly y las rutas que la usan exigen `X-Requested-With`. Una clave personal
   sigue las reglas de la aplicación con `personal_keys` y nunca declara otra persona.
+- Caché (ADR-015): opcional por aplicación, la clave incluye la persona final y el valor va
+  cifrado; un acierto pasa por `security_output` y la auditoría (proveedor `cache`). Si Redis
+  falla, se sigue sin caché.
 - Cada fase llega en un PR con tests, `ruff` y cobertura en verde, y una prueba en Docker
   que se pueda repetir.
 - No exponer MySQL ni Redis fuera de `data_net`. Nginx solo publica las rutas que tocan.

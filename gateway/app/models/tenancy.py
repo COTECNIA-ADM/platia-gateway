@@ -105,3 +105,7 @@ class Application(TimestampMixin, SoftDeleteMixin, Base):
     # Sus reglas (modelos, propósitos, límites, contenido) se aplican a las claves personales
     # de la organización (G10). Como mucho una por organización (lo comprueba la CLI).
     personal_keys: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Caché exacta de respuestas (G11, ADR-015): segundos que se guarda una respuesta (0 = sin
+    # caché) y propósitos a los que se aplica (NULL = todos)
+    cache_ttl_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    cache_purposes: Mapped[list | None] = mapped_column(JSON, nullable=True)
